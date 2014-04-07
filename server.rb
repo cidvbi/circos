@@ -10,7 +10,6 @@ end
 
 # Route for processing submitted form data
 post "/" do
-    CircosGenerator::create_circos_image(params)
-
-    'Got the data!'
+    image_id = CircosGenerator.create_circos_image(params)
+    erb :index, :locals => { :folder_name => image_id }
 end

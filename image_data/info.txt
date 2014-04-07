@@ -1,0 +1,1 @@
+This folder will contain all generated image data for each request that users make.

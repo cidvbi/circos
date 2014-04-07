@@ -2,63 +2,62 @@
 <html>
 <head>
     <title>Circos Test Page</title>
-    <script type="text/javascript">
-        function validateForm() {
-            var goButton = document.getElementById("go");
-            var gid = document.getElementById("gid");
-            var inputs = document.getElementsByTagName('input');
-            var errorMessage = document.getElementById('errorMessage');
-            var oneChecked = false;
-            for (var i = inputs.length - 1; i >= 0; i--) {
-                // Check that at least one checkbox has been checked
-                if (inputs[i].type == "checkbox" && inputs[i].checked == true) {
-                    oneChecked = true;
-                };
-            };
-
-            if (gid.value == "" || !oneChecked) {
-                errorMessage.innerHTML = "A GID must be entered and at least \
-                    one checkbox must be checked";
-                return false;
-            };
-
-            return true;
-        }
-    </script>
+    <script type="text/javascript" src="/js/main.js"></script>
     <style type="text/css">
         body {
             font-family: Helvetica;
+            margin-left: 50px;
         }
 
         h1, h2 {
             font-weight: normal;
         }
+
+        #left {
+            float: left;
+            width: 50%;
+        }
+
+        #right {
+            float: right;
+            width: 50%;
+        }
     </style>
 </head>
 <body>
     <h1>Circos Image Generator Test Page</h1>
-    <div style="margin-left: 25px;">
-        <div id="errorMessage" style="color: red;">
-        </div>
+    <div id="left">
         <form action="/" method="post">
             <h2>Enter the GID you want to display</h2>
-            <b>GID:</b>
+            <b><label for="gid">GID:</label></b>
             <input name="gid" id="gid" type="text"/>
-            <h2>Check off what you would like to plot:</h2>
+            <h2>Check the data that you would like to plot:</h2>
             <%
-                # Generate checkboxes for each data option
-                fields = ['CDS Forward', 'CDS Reverse', 'RNA Forward',
-                          'RNA Reverse', 'Misc Forward', 'Misc Reverse']
-                fields.each do |field|
-                    field_name = field.downcase.gsub(/\s/, '_')
+               # Generate checkboxes for each data option
+               fields = ['CDS Forward', 'CDS Reverse', 'RNA Forward',
+                         'RNA Reverse', 'Misc Forward', 'Misc Reverse']
+               fields.each do |field|
+                   field_name = field.downcase.gsub(/\s/, '_')
             %>
             <input name="<%=field_name%>" id="<%=field_name%>" type="checkbox"/>
             <label for="<%=field_name%>"><%=field%></label>
             <br>
-            <%  end%>
+            <% end %>
+            <br><hr><br>
+            <input name="add_custom_track" id="add_custom_track" type="checkbox" onclick="addCustomTrack();"/>
+            <label for="add_custom_track">Custom Tracks?</label>
+            <div id="custom_tracks"></div>
             <br>
-            <button name="go" id="go" type="submit" onclick="return validateForm();">Go</button>
+            <button name="go" id="go" onclick="return validateForm();">Go</button>
         </form>
+    </div>
+    <div id="right">
+        <% if defined? folder_name %>
+            <h2>Your generated Circos plot:</h2>
+            <object type="image/svg+xml" data="images/<%=folder_name%>/circos.svg">
+                Your browser does not support SVG.
+            </object>
+        <% end %>
     </div>
 </body>
 </html>

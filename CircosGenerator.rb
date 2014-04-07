@@ -1,5 +1,6 @@
 require 'sinatra'
 require 'fileutils'
+require 'mustache'
 
 class CircosGenerator < Sinatra::Base
 
@@ -7,21 +8,62 @@ class CircosGenerator < Sinatra::Base
         @logger ||= Logger.new STDOUT
     end
 
+    # Public method to create Circos image based on data from web form
+    #
     def self.create_circos_image(parameters)
         unless parameters.empty?
+            # Delete any existing Circos data files
+            FileUtils.rm_rf(Dir.glob('circos_data/*'))
+
+            # Collect genome data using Solr API for PATRIC
             genome_data = get_genome_data(parameters)
-            create_circos_data_files(genome_data)
+
+            if genome_data.nil? || genome_data.empty?
+                logger.error "No genome data found for GID #{parameters[:gid]}"
+                return nil
+            end
+
+            # Run 'uuidgen' command to create a random string to name temp directory
+            # for the circos image and data files
+            uuid = `uuidgen`.chomp.gsub(/-/, '')
+            folder_name = "image_data/#{uuid}"
+
+            # Create temp directory for this image's data
+            Dir.mkdir(folder_name)
+
+            # Create data and config files for Circos
+            create_circos_data_files(folder_name, parameters, genome_data)
+            create_circos_config_files(folder_name, genome_data)
+
+            # Create directory to store final image
+            Dir.mkdir("public/images/#{uuid}")
+
+            logger.info "Starting Circos script..."
+
+            # Run Circos script to generate final image
+            `circos -conf #{folder_name}/circos_configs/circos.conf -debug_group summary,timer > circos.log.out`
+
+            logger.info "Circos image was created successfully!"
+
+            return uuid
         end
+
+        logger.error "Circos image could not be created"
+        return nil
     end
 
+
+    #######################
+    ### Private methods ###
+    #######################
     private
     def self.get_genome_data(parameters)
         # Hash for query strings of each feature type. Lookup is based on the
         # first half of the parameter's name,
-        # e.g. cds_forward's first half is "cds"
+        # e.g. cds_forward's lookup is "cds"
         feature_types = {
             "cds" => "feature_type:CDS",
-            "rna" => "feature_type:RNA",
+            "rna" => "feature_type:*RNA",
             "misc" => "!(feature_type:*RNA OR feature_type:CDS)"
         }
 
@@ -37,19 +79,27 @@ class CircosGenerator < Sinatra::Base
 
         # Hash to store JSON response data from Solr
         genome_data = {}
+
+        track_types = [
+            "cds_forward", "cds_reverse",
+            "rna_forward", "rna_reverse",
+            "misc_forward", "misc_reverse"
+        ]
         # Iterate over each checked off data type
-        parameters.keys.each do |key|
-            # Skip "Go" button and GID field parameters
-            next if key == 'go' || key == 'gid'
-            logger.info "Getting #{key} data"
+        parameters.keys.each do |parameter|
+
+            # Skip over parameters that aren't track types
+            next unless track_types.include? parameter || /custom_track_.*/.match(parameter)
+            logger.info "Getting #{parameter} data"
 
             # Build query string based on user's input
-            feature_type = feature_types[key.split("_")[0]]
-            strand = key.split("_")[1] == 'forward' ? '+' : '-'
+            feature_type = feature_types[parameter.split("_")[0]]
+            strand = parameter.split("_")[1] == 'forward' ? '+' : '-'
             query_data = {
                 :wt => "json",
                 :q => "gid:#{gid} AND strand:\"#{strand}\"",
                 :fq => "annotation_f:PATRIC AND #{feature_type}",
+                :sort => "accession asc,start_max asc",
                 :indent => "true",
                 :rows => 10000
             }
@@ -57,21 +107,22 @@ class CircosGenerator < Sinatra::Base
             # Encode the query as a URL and parse the JSON response into a Ruby
             # Hash object
             query_uri.query = URI.encode_www_form(query_data)
-            logger.info "Requesting data from URL: #{query_uri}"
+            logger.info "Requesting feature data from URL: #{query_uri}"
             response = JSON.parse(open(query_uri).read)
 
             # Pull out only the gene data from the JSON response
-            genome_data[key] = response['response']['docs']
+            genome_data[parameter] = response['response']['docs']
         end
 
         return genome_data
     end
 
-    def self.create_circos_data_files(genome_data)
-        # Delete any existing Circos data files
-        FileUtils.rm_rf(Dir.glob('circos_data/*'))
+    def self.create_circos_data_files(folder_name, parameters, genome_data)
 
-        genome = ""
+        # Create folder for all data files
+        FileUtils.mkdir("#{folder_name}/circos_data")
+
+        genome = nil
         accessions = {}
         genome_data.each do |feature_type,feature_data|
 
@@ -79,55 +130,124 @@ class CircosGenerator < Sinatra::Base
             logger.info "Writing data file for feature, #{feature_type}"
 
             # File name has the following format: feature.strand.txt
-            # e.g. cds.forward.txt OR rna.reverse.txt
+            # e.g. cds.forward.txt, rna.reverse.txt
             file_name = feature_type.gsub(/_/,'.') + ".txt"
-            File.open("circos_data/#{file_name}", "w+") do |file|
-
-                # Sort features primarily by their accession and secondarily by
-                # their start_max
-                feature_data.sort { |a,b|
-                    comp = a['accession'] <=> b['accession']
-                    comp.zero? ? (a['start_max'] <=> b['start_max']) : comp
-                }.each do |gene|
+            File.open("#{folder_name}/circos_data/#{file_name}", "w+") do |file|
+                feature_data.each do |gene|
                     # Store name of the genome
-                    genome = gene["genome_name"] if genome.empty?
+                    genome ||= gene["genome_name"]
 
-                    # File data writing goes here
-                    accession = gene['accession']
-                    start_max = gene['start_max']
-                    end_min = gene['end_min']
-
-                    file.write("#{accession}\t#{start_max}\t#{end_min}\n")
-
-                    # Add the current accession to accessions list to create the
-                    # karyotype file. End values are stored to write length of the
-                    # accession to the karyotype file later.
-                    if accessions[accession].nil?
-                        # Create a hash entry for the current accession if one doesn't
-                        # exist
-                        accessions[accession] = { :end => [end_min] }
-                    else
-                        # Otherwise add end to list for the current
-                        # accession
-                        accessions[accession][:end] << end_min
-                    end
+                    file.write("#{gene['accession']}\t#{gene['start_max']}\t#{gene['end_min']}\n")
                 end
             end
         end
 
+        # Build base URL
+        query_uri = URI::HTTP.build({
+            :host => "macleod.vbi.vt.edu",
+            :port => 8983,
+            :path => "/solr/sequenceinfo/select"
+        })
+
+        # Data for accession info query
+        gid = parameters[:gid]
+        query_data = {
+            :wt => "json",
+            :q => "gid:#{gid}",
+            :sort => "accession asc",
+            :indent => "true"
+        }
+        query_uri.query = URI.encode_www_form(query_data)
+        logger.info "Requesting accession data from URL: #{query_uri}"
+        response = JSON.parse(open(query_uri).read)
+        accessions = response['response']['docs']
+
         # Write karyotype file
         logger.info "Creating karyotype file for genome, #{genome}"
-        File.open("circos_data/karyotype.txt", "w+") do |file|
-            accessions.keys.sort.each do |accession|
-                a_data = accessions[accession]
-                # Get the lowest start and the largest end for the karyotype
-                # file
-                max_end = a_data[:end].max
-                file.write("chr\t-\t#{accession}\t#{genome}\t0\t#{max_end}\tgray\n")
+        File.open("#{folder_name}/circos_data/karyotype.txt", "w+") do |file|
+            accessions.each do |accession_data|
+                file.write("chr\t-\t#{accession_data['accession']}\t#{genome}\t0\t#{accession_data['length']}\tgrey\n")
+            end
+        end
+
+        # Write "large tiles" file
+        logger.info "Creating large tiles file for genome, #{genome}"
+        File.open("#{folder_name}/circos_data/large.tiles.txt", "w+") do |file|
+            accessions.each do |accession_data|
+                file.write("#{accession_data['accession']}\t0\t#{accession_data['length']}\n")
             end
         end
 
         return true
     end
 
+    # Method to create Circos configuration files. Currently only creates a
+    # plots.conf file as it is the only one that truly must be dynamically
+    # generated
+    #
+    def self.create_circos_config_files(folder_name, genome_data)
+        colors = ['vdblue', 'vdgreen', 'lgreen', 'vdred', 'lred', 'vdpurple', 'lpurple']
+
+        # Create folder for config files
+        FileUtils.mkdir("#{folder_name}/circos_configs")
+
+        # Copy static conf files to image's temp directory
+        FileUtils.cd('conf_templates') do
+            FileUtils.cp(%w(ideogram.conf ticks.conf),
+                         "../#{folder_name}/circos_configs")
+        end
+
+        logger.info "Writing config file for plots"
+        # Open final plot configuration file for creation
+        File.open("#{folder_name}/circos_configs/plots.conf", "w+") do |file|
+            plots = []
+            current_radius = 1.0;
+
+            # Build hash for large tile data because it is not included in the
+            # genomic data
+            large_tile_data = {}
+            large_tile_data['file'] = 'circos_data/large.tiles.txt'
+            large_tile_data['thickness'] = '15p'
+            large_tile_data['type'] = 'tile'
+            large_tile_data['color'] = colors.shift
+            large_tile_data['r1'] = "#{current_radius}r"
+            large_tile_data['r0'] = "#{(current_radius -= 0.02)}r"
+            plots << large_tile_data
+
+            # Build hash of plot data for Mustache to render
+            genome_data.each_key do |feature_type|
+                plot_data = {}
+                file_name = feature_type.gsub(/_/,'.') + ".txt"
+                plot_data['file'] = "circos_data/#{file_name}"
+                plot_data['thickness'] = '30p'
+                plot_data['type'] = 'tile'
+                plot_data['color'] = colors.shift
+                plot_data['r1'] = "#{current_radius -= 0.01}r"
+                plot_data['r0'] = "#{current_radius -= 0.04}r"
+                plots << plot_data
+            end
+
+            # Render plots config file using template
+            file.write(Mustache.render(File.read("conf_templates/plots.mu"), :plots => plots))
+        end
+
+        # Split out the UUID from the folder name to obfuscate the final image's
+        # path as well
+        image_id = folder_name.split('/')[1]
+
+        logger.info "Writing config file for images"
+        # Open final image configuration file for creation
+        File.open("#{folder_name}/circos_configs/image.conf", "w+") do |file|
+            # Render image config file using template
+            file.write(Mustache.render(File.read("conf_templates/image.mu"), :path => "public/images/#{image_id}"))
+        end
+
+        logger.info "Writing main config file for Circos"
+        # Open final circos configuration file for creation
+        File.open("#{folder_name}/circos_configs/circos.conf", "w+") do |file|
+            # Render main circos config file using template
+            file.write(Mustache.render(File.read("conf_templates/circos.mu"), :folder => folder_name))
+        end
+
+    end
 end

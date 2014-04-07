@@ -1,1 +1,7 @@
 circos_data/*
+*.out
+public/*
+!public/js
+
+image_data/*
+!image_data/info.txt
