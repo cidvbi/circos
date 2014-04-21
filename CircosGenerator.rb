@@ -9,7 +9,8 @@ class CircosGenerator < Sinatra::Base
     end
 
     $image_size = 1000
-    $outer_track_included = false
+    $include_outer_track = false
+    $track_width = 0.03
 
     # Public method to create Circos image based on data from web form
     #
@@ -19,10 +20,14 @@ class CircosGenerator < Sinatra::Base
             FileUtils.rm_rf(Dir.glob('circos_data/*'))
 
             # Record whether to include outer track or not
-            $outer_track_included = parameters[:include_outer_track] unless parameters[:include_outer_track].nil?
+            $include_outer_track = (parameters[:include_outer_track] == 'on')
 
             # Store image size parameter from form
             $image_size = parameters[:image_dimensions].to_i unless parameters[:image_dimensions].empty?
+
+            # Convert track width parameter to percentage and store it
+            $track_width = parameters[:track_width].to_i / 100.0 unless parameters[:track_width].empty?
+            logger.info "TRACK WIDTH: #{$track_width}"
 
             # Collect genome data using Solr API for PATRIC
             genome_data = get_genome_data(parameters)
@@ -221,6 +226,20 @@ class CircosGenerator < Sinatra::Base
             end
         end
 
+        # Move any user-uploaded files into circos_data directory
+        file_chooser_data = parameters[:file_chooser]
+        unless file_chooser_data.nil?
+            File.open("#{folder_name}/circos_data/user.upload.txt", "w+") do |file|
+
+                # Read from the server's temporary version of the file and write
+                # it to a data file in the new image's directory
+                file.write(file_chooser_data[:tempfile].read)
+
+                # Add custom track to genome data so that it will be plotted
+                genome_data['user_upload'] = true
+            end
+        end
+
         return true
     end
 
@@ -242,11 +261,12 @@ class CircosGenerator < Sinatra::Base
         end
 
         logger.info "Writing config file for plots"
+
         # Open final plot configuration file for creation
         File.open("#{folder_name}/circos_configs/plots.conf", "w+") do |file|
             plots = []
             current_radius = 1.0
-            track_thickness = $image_size * 0.03;
+            track_thickness = $image_size * $track_width
 
             # Build hash for large tile data because it is not included in the
             # genomic data
@@ -263,6 +283,9 @@ class CircosGenerator < Sinatra::Base
                 colors.shift
             end
 
+            # Space in between tracks
+            track_buffer = $track_width - 0.03
+
             # Build hash of plot data for Mustache to render
             genome_data.each_key do |feature_type|
                 plot_data = {}
@@ -271,8 +294,8 @@ class CircosGenerator < Sinatra::Base
                 plot_data['thickness'] = "#{track_thickness}p"
                 plot_data['type'] = 'tile'
                 plot_data['color'] = colors.shift
-                plot_data['r1'] = "#{current_radius -= 0.01}r"
-                plot_data['r0'] = "#{current_radius -= 0.04}r"
+                plot_data['r1'] = "#{(current_radius -= (0.01 + track_buffer)).round(2)}r"
+                plot_data['r0'] = "#{(current_radius -= (0.04 + track_buffer)).round(2)}r"
                 plots << plot_data
             end
 

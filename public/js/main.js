@@ -2,6 +2,48 @@ $(document).ready(function(){
     $('#image_dimensions').keyup(function () {
         this.value = this.value.replace(/[^0-9\.]/g,'');
     });
+
+    $("#image_data_form").submit(function(e) {
+        if (validateForm()) {
+            var formObj = $(this);
+            var formURL = formObj.attr("action");
+            var formData = new FormData(this);
+            var circos_result = $("#circos_result");
+
+            $("#go").prop("disabled", true);
+            $.ajax({
+                url: formURL,
+                type: "POST",
+                data:  formData,
+                mimeType: "multipart/form-data",
+                contentType: false,
+                cache: false,
+                processData: false
+            })
+            .done(function(response) {
+                var image_file = "images/"+response+"/circos.svg";
+                circos_result.html(
+                    "<h2>Your generated Circos plot:</h2> \
+                    <object type=\"image/svg+xml\" data=\""+image_file+"\"> \
+                        Your browser does not support SVG. \
+                    </object>"
+                );
+            })
+            .fail(function() {
+                $("#errorMessage").html("The Circos image could not be created");
+            })
+            .always(function() {
+                $("#go").removeAttr("disabled");
+            });
+            circos_result.html("<h2>Circos image is being generated...</h2>");
+        }
+        e.preventDefault();
+        return false;
+    });
+
+    $("#track_width").change(function() {
+        $("#slider_value").html(this.value + "%");
+    });
 });
 
 function validateForm() {
@@ -19,36 +61,14 @@ function validateForm() {
     });
 
     if (gid.val() == "" || !oneChecked) {
-        errorMessageDiv.html("A GID must be entered and at least one checkbox must be checked");
+        errorMessageDiv.html("A GID must be entered and at least one default track must be selected");
         return false;
     };
 
     return true;
 }
 
-function generateImage() {
-    if (validateForm()) {
-        $("#go").attr("disabled", "disabled");
-        var circos_result = $("#circos_result");
-        $.post("/", $("#image_data_form").serialize(), function(response) {
-            var image_file = "images/"+response+"/circos.svg";
 
-            circos_result.html(
-                "<h2>Your generated Circos plot:</h2> \
-                <object type=\"image/svg+xml\" data=\""+image_file+"\"> \
-                    Your browser does not support SVG. \
-                </object>"
-            );
-        })
-        .fail(function() {
-            $("#errorMessage").html("The Circos image could not be created");
-        })
-        .always(function() {
-            $("#go").removeAttr("disabled");
-        });
-        circos_result.html("Circos image is being generated...");
-    }
-}
 
 // Variable to store current number of custom tracks
 var customTrackCount = 0;
