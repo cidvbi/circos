@@ -1,7 +1,6 @@
 circos_data/*
 *.out
-public/*
-!public/js
+public/images
 
 image_data/*
 !image_data/info.txt
