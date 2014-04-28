@@ -11,11 +11,13 @@ class CircosGenerator < Sinatra::Base
     $image_size = 1000
     $include_outer_track = false
     $track_width = 0.03
+    $file_plot_types = 'tiles'
 
     # Public method to create Circos image based on data from web form
     #
     def self.create_circos_image(parameters)
         unless parameters.empty?
+
             # Delete any existing Circos data files
             FileUtils.rm_rf(Dir.glob('circos_data/*'))
 
@@ -27,7 +29,6 @@ class CircosGenerator < Sinatra::Base
 
             # Convert track width parameter to percentage and store it
             $track_width = parameters[:track_width].to_i / 100.0 unless parameters[:track_width].empty?
-            logger.info "TRACK WIDTH: #{$track_width}"
 
             # Collect genome data using Solr API for PATRIC
             genome_data = get_genome_data(parameters)
@@ -137,11 +138,13 @@ class CircosGenerator < Sinatra::Base
         track_nums.each do |track_num|
             custom_track_name = "custom_track_#{track_num}"
             feature_type = parameters["custom_track_type_#{track_num}"]
+
             strand = case parameters["custom_track_strand_#{track_num}"]
                 when 'forward' then ' AND strand:"+"'
                 when 'reverse' then ' AND strand:"-"'
                 when 'both' then ''
             end
+
             keywords = parameters["custom_track_keyword_#{track_num}"]
             keywords = " AND #{keywords}" unless keywords.empty?
 
@@ -214,7 +217,12 @@ class CircosGenerator < Sinatra::Base
         logger.info "Creating karyotype file for genome, #{genome}"
         File.open("#{folder_name}/circos_data/karyotype.txt", "w+") do |file|
             accessions.each do |accession_data|
-                file.write("chr\t-\t#{accession_data['accession']}\t#{genome.gsub(/\s/, '_')}\t0\t#{accession_data['length']}\tgrey\n")
+                file.write("chr\t-\t \
+                            #{accession_data['accession']}\t \
+                            #{genome.gsub(/\s/, '_')}\t \
+                            0\t \
+                            #{accession_data['length']}\t \
+                            grey\n")
             end
         end
 
@@ -226,17 +234,35 @@ class CircosGenerator < Sinatra::Base
             end
         end
 
-        # Move any user-uploaded files into circos_data directory
-        file_chooser_data = parameters[:file_chooser]
-        unless file_chooser_data.nil?
-            File.open("#{folder_name}/circos_data/user.upload.txt", "w+") do |file|
+        uploaded_file_name_list = parameters[:file_chooser].map { |e| e[:tempfile] }
 
-                # Read from the server's temporary version of the file and write
-                # it to a data file in the new image's directory
-                file.write(file_chooser_data[:tempfile].read)
+        # Get file plot type parameters from web form and convert the symbols
+        # to strings
+        $file_plot_types = parameters.select { |k,v| k.include? "file_plot_type" }
+                                     .map { |k,v| v }
 
-                # Add custom track to genome data so that it will be plotted
-                genome_data['user_upload'] = true
+        unless uploaded_file_name_list.nil?
+            uploaded_file_name_list.each_with_index do |upload_tempfile,i|
+                File.open("#{folder_name}/circos_data/user.upload.#{i}.txt", "w") do |file|
+                    first_line = upload_tempfile.readline
+                    file_plot_type = $file_plot_types[i]
+
+                    if file_plot_type == 'tile'
+                        next if first_line.split(/\s+/).size != 3
+                    else
+                        next if first_line.split(/\s+/).size != 4
+                    end
+
+                    # Read from the server's temporary version of the file and write
+                    # it to a data file in the new image's directory
+                    upload_tempfile.rewind
+                    tempfile_contents = upload_tempfile.read
+
+                    file.write(tempfile_contents)
+
+                    # Add custom track to genome data so that it will be plotted
+                    genome_data["user_upload_#{i}"] = true
+                end
             end
         end
 
@@ -264,7 +290,7 @@ class CircosGenerator < Sinatra::Base
 
         # Open final plot configuration file for creation
         File.open("#{folder_name}/circos_configs/plots.conf", "w+") do |file|
-            plots = []
+            tileplots = []
             current_radius = 1.0
             track_thickness = $image_size * $track_width
 
@@ -278,7 +304,7 @@ class CircosGenerator < Sinatra::Base
                 large_tile_data['color'] = colors.shift
                 large_tile_data['r1'] = "#{current_radius}r"
                 large_tile_data['r0'] = "#{(current_radius -= 0.02)}r"
-                plots << large_tile_data
+                tileplots << large_tile_data
             else
                 colors.shift
             end
@@ -286,21 +312,65 @@ class CircosGenerator < Sinatra::Base
             # Space in between tracks
             track_buffer = $track_width - 0.03
 
+            nontileplots = []
             # Build hash of plot data for Mustache to render
             genome_data.each_key do |feature_type|
                 plot_data = {}
-                file_name = feature_type.gsub(/_/,'.') + ".txt"
-                plot_data['file'] = "circos_data/#{file_name}"
-                plot_data['thickness'] = "#{track_thickness}p"
-                plot_data['type'] = 'tile'
-                plot_data['color'] = colors.shift
-                plot_data['r1'] = "#{(current_radius -= (0.01 + track_buffer)).round(2)}r"
-                plot_data['r0'] = "#{(current_radius -= (0.04 + track_buffer)).round(2)}r"
-                plots << plot_data
+
+                # Handle user uploaded files
+                if feature_type.include? 'user_upload'
+                    user_upload_number = feature_type.split('_').last.to_i
+                    plot_type = $file_plot_types[user_upload_number]
+
+                    if plot_type == 'tile' || plot_type == 'heatmap'
+                        file_name = feature_type.gsub(/_/,'.') + '.txt'
+                        plot_data['file'] = "circos_data/#{file_name}"
+                        plot_data['thickness'] = "#{track_thickness}p"
+                        plot_data['type'] = plot_type
+
+                        color = plot_type == 'tile' ? colors.shift : 'rdbu-10-div'
+                        plot_data['color'] = color
+
+                        plot_data['r1'] = "#{(current_radius -= (0.01 + track_buffer)).round(2)}r"
+                        plot_data['r0'] = "#{(current_radius -= (0.04 + track_buffer)).round(2)}r"
+
+                        tileplots << plot_data
+                    else
+                        file_name = feature_type.gsub(/_/,'.') + ".txt"
+                        plot_data['file'] = "circos_data/#{file_name}"
+
+                        plot_data['type'] = plot_type
+                        plot_data['color'] = colors.shift
+
+                        plot_data['r1'] = "#{(current_radius -= (0.01 + track_buffer)).round(2)}r"
+                        plot_data['r0'] = "#{(current_radius -= (0.10 + track_buffer)).round(2)}r"
+
+                        plot_data['extendbin'] = "extend_bin = no" if plot_type == 'histogram'
+
+                        # If the line color is "vdred", the base color will be
+                        # just "red" and the plot's background will be "vvlred"
+                        base_color = plot_data['color'].gsub(/^[vld]+/, '')
+                        plot_data['plotbgcolor'] = "vvl#{base_color}"
+
+                        nontileplots << plot_data
+                    end
+                # Handle default/custom tracks
+                else
+                    file_name = feature_type.gsub(/_/,'.') + ".txt"
+                    plot_data['file'] = "circos_data/#{file_name}"
+                    plot_data['thickness'] = "#{track_thickness}p"
+                    plot_data['type'] = 'tile'
+                    plot_data['color'] = colors.shift
+                    plot_data['r1'] = "#{(current_radius -= (0.01 + track_buffer)).round(2)}r"
+                    plot_data['r0'] = "#{(current_radius -= (0.04 + track_buffer)).round(2)}r"
+                    tileplots << plot_data
+                end
             end
 
             # Render plots config file using template
-            file.write(Mustache.render(File.read("conf_templates/plots.mu"), :plots => plots))
+            file.write(Mustache.render(File.read("conf_templates/plots.mu"),
+                                        :tileplots => tileplots,
+                                        :nontileplots => nontileplots))
         end
 
         # Split out the UUID from the folder name to obfuscate the final image's

@@ -1,5 +1,5 @@
 <plots>
-    {{#plots}}
+    {{#tileplots}}
     <plot>
         show = yes
         type = {{type}}
@@ -14,9 +14,45 @@
         stroke_thickness = 0.1
         stroke_color = {{color}}
         color = {{color}}
+
         r0 = {{r0}}
         r1 = {{r1}}
     </plot>
 
-    {{/plots}}
+    {{/tileplots}}
+    {{#nontileplots}}
+    <plot>
+        show = yes
+        type = {{type}}
+        file = {{file}}
+
+        r0 = {{r0}}
+        r1 = {{r1}}
+
+        min = 0.0
+        max = 1.0
+
+        orientation = in
+        thickness = 1
+        color = {{color}}
+        {{extendbin}}
+
+        <backgrounds>
+            <background>
+                color = {{plotbgcolor}}
+                y1 = 1r
+                y0 = 0r
+            </background>
+        </backgrounds>
+
+        <axes>
+            <axis>
+                color = dgrey
+                thickness = 0.5
+                spacing = 0.25r
+            </axis>
+        </axes>
+    </plot>
+
+    {{/nontileplots}}
 </plots>

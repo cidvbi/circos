@@ -1,6 +1,27 @@
-$(document).ready(function(){
+$(document).ready(function() {
     $('#image_dimensions').keyup(function () {
         this.value = this.value.replace(/[^0-9\.]/g,'');
+    });
+
+    $("#track_width").change(function() {
+        $("#slider_value").html(this.value + "%");
+    });
+
+    $("#file_chooser").change(function() {
+        var chosen_files = $("#file_chooser").get(0).files;
+        var file_list_div = $("#file_list");
+        file_list_div.html("");
+        $(chosen_files).each(function(i) {
+            file_name = this.name;
+            file_list_div.append("<b>" + file_name + "</b>&nbsp;&nbsp;" +
+                                 "<label for=\"file_plot_type_"+i+"\">Plot Type:</label>&nbsp;&nbsp;" +
+                                 "<select name=\"file_plot_type_"+i+"\" id=\"file_plot_type_"+i+"\">" +
+                                 "    <option value=\"tile\">Tiles</option>" +
+                                 "    <option value=\"line\">Line Plot</option>" +
+                                 "    <option value=\"histogram\">Histogram</option>" +
+                                 "    <option value=\"heatmap\">Heatmap</option>" +
+                                 "</select><br>");
+        });
     });
 
     $("#image_data_form").submit(function(e) {
@@ -39,10 +60,6 @@ $(document).ready(function(){
         }
         e.preventDefault();
         return false;
-    });
-
-    $("#track_width").change(function() {
-        $("#slider_value").html(this.value + "%");
     });
 });
 

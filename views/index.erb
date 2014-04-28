@@ -1,22 +1,22 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Circos Test Page</title>
+    <title>Circos Image Generator</title>
     <script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>
     <script type="text/javascript" src="/js/main.js"></script>
     <link rel="stylesheet" type="text/css" href="/css/styles.css">
 </head>
 <body>
-    <h1 id="page_title">Circos Image Generator Test Page</h1>
+    <h1 id="page_title">Circos Image Generator</h1>
     <div id="error_message"></div>
     <div id="container">
         <form id="image_data_form" action="/" method="POST" enctype="multipart/form-data">
             <div id="left_side">
-                <h2>Enter the GID you want to display</h2>
+                <h2>1. Enter the GID you want to display</h2>
                 <label for="gid">GID:</label>
                 <input name="gid" id="gid" type="text"/>
                 <br><br><hr>
-                <h2>Default Data Tracks:</h2>
+                <h2>2. Default Data Tracks:</h2>
                 <%
                    # Generate checkboxes for each data option
                    fields = ['CDS Forward', 'CDS Reverse', 'RNA Forward',
@@ -34,7 +34,7 @@
                 <div id="custom_tracks"><br></div>
                 <hr>
                 <div>
-                    <h2>Image Customization:</h2>
+                    <h2>3. Image Customization:</h2>
                     <input name="include_outer_track" id="include_outer_track" type="checkbox" checked="checked" />
                     <label for="include_outer_track">Include outer track?</label>
                     <br>
@@ -50,16 +50,23 @@
                     <input name="track_width" id="track_width" type="range" min="1" max="10" value="3">
                     <span name="slider_value" id="slider_value">3%</span>
                     <br>
-                    <small>The default width is 3% of the plot's radius</small>
+                    <small>The default width is 3% of the entire plot's radius</small>
                     <p>Your image will use the SVG format by default.</p>
                 </div>
                 <br>
+                <div style="text-align: center;">
+                    <button name="go" id="go">Go</button>
+                </div>
             </div>
             <div id="right_side">
-                <h2>Upload your own data file:</h2>
+                <h2>4. Upload your own data file</h2>
                 <h4>Your file will be used in conjunction with PATRIC's own data for the GID you enter to the left.</h4>
-                <label>Upload a file:</label>
-                <input name="file_chooser" id="file_chooser" type="file"/>
+                <label for="file_chooser">Upload files:</label>
+                <input name="file_chooser[]" id="file_chooser" type="file" multiple>
+                <br><br>
+                <div name="file_list" id="file_list">
+                </div>
+
                 <h4>The file should use the following format:</h4>
 <pre>
 accession_name    strand_start    strand_end
@@ -71,11 +78,18 @@ AZJI01000001    711302    712414
 AZJI01000001    712941    713504
 AZJI01000004    713       901
 ...</pre>
+                <h4>Or a fourth column can contain a scalar value between 0 and 1 that will be associated with the strand:</h4>
+<pre>
+...
+AZJI01000001    711302    712414    0.75
+AZJI01000001    712941    713504    0.56
+AZJI01000004    713       901       0.39
+...</pre>
+                <h3>
+                    Three column files should be displayed as tiles. Four column files can be displayed as line plots, histograms, or heatmaps.
+                </h3>
             </div>
         </form>
-    </div>
-    <div style="text-align: center;">
-        <button name="go" id="go">Go</button>
     </div>
     <br><hr><br>
     <div id="circos_result">
