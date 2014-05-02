@@ -21,6 +21,10 @@ class CircosGenerator < Sinatra::Base
             # Delete any existing Circos data files
             FileUtils.rm_rf(Dir.glob('circos_data/*'))
 
+            # Record whether to include GC content track or not
+            $gc_content_plot_type = parameters[:gc_content_plot_type]
+            $gc_skew_plot_type = parameters[:gc_skew_plot_type]
+
             # Record whether to include outer track or not
             $include_outer_track = (parameters[:include_outer_track] == 'on')
 
@@ -213,6 +217,8 @@ class CircosGenerator < Sinatra::Base
         response = JSON.parse(open(query_uri).read)
         accessions = response['response']['docs']
 
+        accession_sequence_data = {}
+
         # Write karyotype file
         logger.info "Creating karyotype file for genome, #{genome}"
         File.open("#{folder_name}/circos_data/karyotype.txt", "w+") do |file|
@@ -223,6 +229,93 @@ class CircosGenerator < Sinatra::Base
                             0\t \
                             #{accession_data['length']}\t \
                             grey\n")
+
+                unless $gc_content_plot_type.nil? && $gc_skew_plot_type.nil?
+                    accession_sequence_data[accession_data['accession']] = accession_data['sequence']
+                end
+            end
+        end
+
+        # Default window size for GC calculations
+        window_size = 2000
+
+        # Create GC content data file
+        unless $gc_content_plot_type.nil?
+            logger.info 'Creating data file for GC content'
+
+            accession_sequence_data.each do |accession,sequence|
+                total_seq_length = sequence.length
+                gc_content_values = {}
+
+                # Iterate over each window_size-sized block and calculate its GC
+                # content.
+                # For instance, if the sequence length were 1,234,567 and the
+                # window size were 1000, we would iterate 1234 times, with the
+                # last iteration being the window from 1,234,001 to 1,234,566
+                for i in 0..(total_seq_length / window_size)
+
+                    # Only use 0 as start index for first iteration, otherwise
+                    # with a window_size of 1000, start should be something like
+                    # 1001, 2001, and so on.
+                    start_index = i == 0 ? 0 : i * window_size + 1
+
+                    # End index should either be 'window_size' greater than the start or
+                    # if we are at the last iteration, the end of the sequence.
+                    end_index = [(i + 1) * window_size, total_seq_length - 1].min
+
+                    # Store number of 'g' and 'c' characters from the sequence
+                    gc_count = sequence[start_index..end_index].chars
+                                                               .reject{ |e| e.match(/[gcGC]/).nil? }
+                                                               .size
+                    gc_percentage = gc_count / window_size.to_f
+
+                    # Store percentage in gc_content_values hash as value with the
+                    # range from the start index to the end index as the key
+                    gc_content_values[start_index..end_index] = gc_percentage.round(5)
+                end
+
+                # Write GC content data for this accession
+                File.open("#{folder_name}/circos_data/gc.content.txt", "a+") do |file|
+                    gc_content_values.each do |range,percentage|
+                        file.write("#{accession}\t#{range.first}\t#{range.last}\t#{percentage}\n")
+                    end
+                end
+
+                genome_data['gc_content'] = true
+            end
+        end
+
+        # Create GC skew data file
+        unless $gc_skew_plot_type.nil?
+            logger.info 'Creating data file for GC skew'
+
+            accession_sequence_data.each do |accession,sequence|
+                total_seq_length = sequence.length
+                gc_skew_values = {}
+
+                for i in 0..(total_seq_length / window_size)
+                    start_index = i == 0 ? 0 : i * window_size + 1
+                    end_index = [(i + 1) * window_size, total_seq_length - 1].min
+
+                    g_count = sequence[start_index..end_index].chars
+                                                              .reject{ |e| e.match(/[gG]/).nil? }
+                                                              .size
+                    c_count = sequence[start_index..end_index].chars
+                                                              .reject{ |e| e.match(/[cC]/).nil? }
+                                                              .size
+                    gc_skew = (g_count - c_count) / (g_count + c_count).to_f
+
+                    gc_skew_values[start_index..end_index] = gc_skew.round(5)
+                end
+
+                # Write GC skew data for this accession
+                File.open("#{folder_name}/circos_data/gc.skew.txt", "a+") do |file|
+                    gc_skew_values.each do |range,skew|
+                        file.write("#{accession}\t#{range.first}\t#{range.last}\t#{skew}\n")
+                    end
+                end
+
+                genome_data['gc_skew'] = true
             end
         end
 
@@ -234,34 +327,37 @@ class CircosGenerator < Sinatra::Base
             end
         end
 
-        uploaded_file_name_list = parameters[:file_chooser].map { |e| e[:tempfile] }
+        # Move uploaded data files to the new image's 'circos_data' directory
+        unless parameters[:file_chooser].nil?
+            uploaded_file_name_list = parameters[:file_chooser].map { |e| e[:tempfile] }
 
-        # Get file plot type parameters from web form and convert the symbols
-        # to strings
-        $file_plot_types = parameters.select { |k,v| k.include? "file_plot_type" }
-                                     .map { |k,v| v }
+            # Get file plot type parameters from web form and convert the symbols
+            # to strings
+            $file_plot_types = parameters.select { |k,v| k.include? "file_plot_type" }
+                                         .map { |k,v| v }
 
-        unless uploaded_file_name_list.nil?
-            uploaded_file_name_list.each_with_index do |upload_tempfile,i|
-                File.open("#{folder_name}/circos_data/user.upload.#{i}.txt", "w") do |file|
-                    first_line = upload_tempfile.readline
-                    file_plot_type = $file_plot_types[i]
+            unless uploaded_file_name_list.nil?
+                uploaded_file_name_list.each_with_index do |upload_tempfile,i|
+                    File.open("#{folder_name}/circos_data/user.upload.#{i}.txt", "w") do |file|
+                        first_line = upload_tempfile.readline
+                        file_plot_type = $file_plot_types[i]
 
-                    if file_plot_type == 'tile'
-                        next if first_line.split(/\s+/).size != 3
-                    else
-                        next if first_line.split(/\s+/).size != 4
+                        if file_plot_type == 'tile'
+                            next if first_line.split(/\s+/).size != 3
+                        else
+                            next if first_line.split(/\s+/).size != 4
+                        end
+
+                        # Read from the server's temporary version of the file and write
+                        # it to a data file in the new image's directory
+                        upload_tempfile.rewind
+                        tempfile_contents = upload_tempfile.read
+
+                        file.write(tempfile_contents)
+
+                        # Add custom track to genome data so that it will be plotted
+                        genome_data["user_upload_#{i}"] = true
                     end
-
-                    # Read from the server's temporary version of the file and write
-                    # it to a data file in the new image's directory
-                    upload_tempfile.rewind
-                    tempfile_contents = upload_tempfile.read
-
-                    file.write(tempfile_contents)
-
-                    # Add custom track to genome data so that it will be plotted
-                    genome_data["user_upload_#{i}"] = true
                 end
             end
         end
@@ -345,6 +441,9 @@ class CircosGenerator < Sinatra::Base
                         plot_data['r1'] = "#{(current_radius -= (0.01 + track_buffer)).round(2)}r"
                         plot_data['r0'] = "#{(current_radius -= (0.10 + track_buffer)).round(2)}r"
 
+                        plot_data['min'] = 0.0
+                        plot_data['max'] = 1.0
+
                         plot_data['extendbin'] = "extend_bin = no" if plot_type == 'histogram'
 
                         # If the line color is "vdred", the base color will be
@@ -354,6 +453,47 @@ class CircosGenerator < Sinatra::Base
 
                         nontileplots << plot_data
                     end
+                # Handle GC content/skew tracks
+                elsif feature_type.include? 'gc'
+                    # Dynamically access specific global variable for the GC content/skew's plot type
+                    plot_type = eval("$#{feature_type}_plot_type")
+
+                    if plot_type == 'heatmap'
+                        file_name = feature_type.gsub(/_/,'.') + '.txt'
+                        plot_data['file'] = "circos_data/#{file_name}"
+                        plot_data['thickness'] = "#{track_thickness}p"
+                        plot_data['type'] = plot_type
+
+                        color = plot_type == 'tile' ? colors.shift : 'rdbu-10-div'
+                        plot_data['color'] = color
+
+                        plot_data['r1'] = "#{(current_radius -= (0.01 + track_buffer)).round(2)}r"
+                        plot_data['r0'] = "#{(current_radius -= (0.04 + track_buffer)).round(2)}r"
+
+                        tileplots << plot_data
+                    else
+                        file_name = feature_type.gsub(/_/,'.') + ".txt"
+                        plot_data['file'] = "circos_data/#{file_name}"
+
+                        plot_data['type'] = plot_type
+                        plot_data['color'] = colors.shift
+
+                        plot_data['r1'] = "#{(current_radius -= (0.01 + track_buffer)).round(2)}r"
+                        plot_data['r0'] = "#{(current_radius -= (0.10 + track_buffer)).round(2)}r"
+
+                        plot_data['min'] = feature_type == 'gc_skew' ? -1.0 : 0.0
+                        plot_data['max'] = 1.0
+
+                        plot_data['extendbin'] = "extend_bin = no" if plot_type == 'histogram'
+
+                        # If the line color is "vdred", the base color will be
+                        # just "red" and the plot's background will be "vvlred"
+                        base_color = plot_data['color'].gsub(/^[vld]+/, '')
+                        plot_data['plotbgcolor'] = "vvl#{base_color}"
+
+                        nontileplots << plot_data
+                    end
+
                 # Handle default/custom tracks
                 else
                     file_name = feature_type.gsub(/_/,'.') + ".txt"
