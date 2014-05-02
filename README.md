@@ -23,3 +23,10 @@ The left half of the page contains options for creating an image with default tr
 
 The right half of the page is solely a panel for the user to upload their own data, the format of which is explained in detail on the page.
 
+## Building with gradle
+The gradle (http://www.gradle.org/) is an automated build software. You can download & install from the official homepage or use homebrew if you're using MacOSX (brew install gradle).
+
+    gradle build
+
+## Running in jetty
+    gradle jettyRun 
