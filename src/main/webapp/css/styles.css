@@ -1,0 +1,75 @@
+body {
+    font-family: Helvetica;
+    margin-left: 3%;
+    margin-right: 3%;
+}
+
+h1, h2 {
+    font-weight: normal;
+}
+
+pre {
+    background-color: #e8e8e8;
+    border-radius: 3px;
+    padding: 20px;
+}
+
+small {
+    color: #999;
+    font-size: 0.75em;
+}
+
+#page_title {
+    text-align: center;
+}
+
+#error_message {
+    color: red;
+}
+
+#container {
+    overflow: hidden;
+    position: relative;
+    width: 100%;
+}
+
+#left_side {
+    float: left;
+    width: 49%;
+}
+
+#right_side {
+    float: right;
+    width: 49%;
+    height: 100%;
+}
+
+#track_width {
+    margin-top: 5px;
+}
+
+#circos_result {
+    display: inline-block;
+}
+
+#go {
+    font-family: Helvetica;
+    width: 60px;
+    height: 40px;
+    border-radius: 3px;
+    border: none;
+    background-color: #4a4;
+    font-size: 12pt;
+    color: white;
+}
+
+#go:hover {
+    cursor: pointer;
+    background-color: #070;
+}
+
+#go:disabled {
+    cursor: default;
+    background-color: #050;
+    color: #aaa;
+}
