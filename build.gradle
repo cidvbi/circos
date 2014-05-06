@@ -4,9 +4,18 @@ repositories {
 
 apply plugin: 'java'
 apply plugin: 'war'
+apply plugin: 'eclipse'
 apply plugin: 'jetty'
 
 dependencies {
-   providedCompile 'javax.servlet:servlet-api:2.5', 'javax.servlet:jsp-api:2.0'
-   runtime 'javax.servlet:jstl:1.1.2'
+	compile("org.slf4j:slf4j-api:1.7.7")
+	compile("ch.qos.logback:logback-classic:1.1.2")
+	compile("ch.qos.logback:logback-core:1.1.2")
+	compile("com.googlecode.json-simple:json-simple:1.1.1")
+	compile("org.apache.solr:solr-solrj:4.5.0");
+	compile("com.samskivert:jmustache:1.8");
+	compile("commons-fileupload:commons-fileupload:1.3.1")
+//	compile("org.apache.commons:commons-lang3:3.3.2")
+	providedCompile 'javax.servlet:servlet-api:2.5', 'javax.servlet:jsp-api:2.0'
+	runtime 'javax.servlet:jstl:1.1.2'
 }

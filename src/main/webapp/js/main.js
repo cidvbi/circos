@@ -80,12 +80,40 @@ function validateForm() {
     if (gid.val() == "" || !oneChecked) {
         errorMessageDiv.html("A GID must be entered and at least one default track must be selected");
         return false;
-    };
+    }
 
     return true;
 }
 
+function addGCContentDropdown() {
+    var gcCheckbox = $("#gc_content");
+    var gcDropdownArea = $("#gc_content_dropdown");
+    if (gcCheckbox.prop("checked")) {
+        gcDropdownArea.append("<br><label for=\"gc_content_plot_type\"><b>GC Content Plot Type:</b></label>&nbsp;" +
+                              "<select name=\"gc_content_plot_type\" id=\"gc_content_plot_type\">" +
+                              "  <option value=\"line\">Line Plot</option>" +
+                              "  <option value=\"histogram\">Histogram</option>" +
+                              "  <option value=\"heatmap\">Heatmap</option>" +
+                              "</select>");
+    } else {
+        gcDropdownArea.html("");
+    }
+}
 
+function addGCSkewDropdown() {
+    var gcCheckbox = $("#gc_skew");
+    var gcDropdownArea = $("#gc_skew_dropdown");
+    if (gcCheckbox.prop("checked")) {
+        gcDropdownArea.append("<br><label for=\"gc_skew_plot_type\"><b>GC Skew Plot Type:</b></label>&nbsp;" +
+                              "<select name=\"gc_skew_plot_type\" id=\"gc_skew_plot_type\">" +
+                              "  <option value=\"line\">Line Plot</option>" +
+                              "  <option value=\"histogram\">Histogram</option>" +
+                              "  <option value=\"heatmap\">Heatmap</option>" +
+                              "</select>");
+    } else {
+        gcDropdownArea.html("");
+    }
+}
 
 // Variable to store current number of custom tracks
 var customTrackCount = 0;

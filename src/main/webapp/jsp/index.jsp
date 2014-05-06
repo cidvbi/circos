@@ -13,11 +13,11 @@
     <h1 id="page_title">Circos Image Generator</h1>
     <div id="error_message"></div>
     <div id="container">
-        <form id="image_data_form" action="/circos/" method="POST" enctype="multipart/form-data">
+        <form id="image_data_form" action="/circos/home" method="POST" enctype="multipart/form-data">
             <div id="left_side">
                 <h2>1. Enter the GID you want to display</h2>
                 <label for="gid">GID:</label>
-                <input name="gid" id="gid" type="text"/>
+                <input name="gid" id="gid" type="text" value=87468 />
                 <br><br><hr>
                 <h2>2. Default Data Tracks:</h2>
                 <%
@@ -27,10 +27,18 @@
                    for (String field : fields) {
                        String field_name = field.toLowerCase().replace(" ", "_");
                 %>
-             	   <input name="<%=field_name %>" id="<%=field_name %>" type="checkbox"/>
-             	   <label for="<%=field_name %>"><%=field %></label>
-             	   <br>
+                <input name="<%=field_name%>" id="<%=field_name%>" type="checkbox">
+                <label for="<%=field_name%>"><%=field%></label>
+                <br>
                 <% } %>
+                <br>
+                <input name="gc_content" id="gc_content" type="checkbox" onclick="addGCContentDropdown();">
+                <label for="gc_content">Include track for GC Content?</label>
+                <div id="gc_content_dropdown"></div>
+                <br>
+                <input name="gc_skew" id="gc_skew" type="checkbox" onclick="addGCSkewDropdown();">
+                <label for="gc_skew">Include track for GC Skew?</label>
+                <div id="gc_skew_dropdown"></div>
                 <br><hr><br>
                 <input name="add_custom_track" id="add_custom_track" type="checkbox" onclick="firstCustomTrack();"/>
                 <label for="add_custom_track">Custom Tracks?</label>
@@ -62,8 +70,8 @@
                 </div>
             </div>
             <div id="right_side">
-                <h2>4. Upload your own data file</h2>
-                <h4>Your file will be used in conjunction with PATRIC's own data for the GID you enter to the left.</h4>
+                <h2>4. Upload your own data files</h2>
+                <h4>Your files will be used in conjunction with PATRIC's own data for the GID you enter to the left.</h4>
                 <label for="file_chooser">Upload files:</label>
                 <input name="file_chooser[]" id="file_chooser" type="file" multiple>
                 <br><br>

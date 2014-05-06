@@ -50,6 +50,7 @@ small {
 
 #circos_result {
     display: inline-block;
+    width: 100%
 }
 
 #go {

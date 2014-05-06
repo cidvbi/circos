@@ -6,3 +6,4 @@ image_data/*
 !image_data/info.txt
 
 Gemfile.lock
+/bin
