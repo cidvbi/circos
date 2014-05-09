@@ -29,8 +29,8 @@
         r0 = {{r0}}
         r1 = {{r1}}
 
-        min = 0.0
-        max = 1.0
+        min = {{min}}
+        max = {{max}}
 
         orientation = in
         thickness = 1

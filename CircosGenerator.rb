@@ -18,9 +18,6 @@ class CircosGenerator < Sinatra::Base
     def self.create_circos_image(parameters)
         unless parameters.empty?
 
-            # Delete any existing Circos data files
-            FileUtils.rm_rf(Dir.glob('circos_data/*'))
-
             # Record whether to include GC content track or not
             $gc_content_plot_type = parameters[:gc_content_plot_type]
             $gc_skew_plot_type = parameters[:gc_skew_plot_type]
@@ -237,7 +234,7 @@ class CircosGenerator < Sinatra::Base
         end
 
         # Default window size for GC calculations
-        window_size = 2000
+        default_window_size = 2000
 
         # Create GC content data file
         unless $gc_content_plot_type.nil?
@@ -252,22 +249,24 @@ class CircosGenerator < Sinatra::Base
                 # For instance, if the sequence length were 1,234,567 and the
                 # window size were 1000, we would iterate 1234 times, with the
                 # last iteration being the window from 1,234,001 to 1,234,566
-                for i in 0..(total_seq_length / window_size)
+                for i in 0..(total_seq_length / default_window_size)
 
                     # Only use 0 as start index for first iteration, otherwise
                     # with a window_size of 1000, start should be something like
                     # 1001, 2001, and so on.
-                    start_index = i == 0 ? 0 : i * window_size + 1
+                    start_index = i == 0 ? 0 : i * default_window_size + 1
 
                     # End index should either be 'window_size' greater than the start or
                     # if we are at the last iteration, the end of the sequence.
-                    end_index = [(i + 1) * window_size, total_seq_length - 1].min
+                    end_index = [(i + 1) * default_window_size, total_seq_length - 1].min
+
+                    current_window_size = end_index - start_index
 
                     # Store number of 'g' and 'c' characters from the sequence
                     gc_count = sequence[start_index..end_index].chars
                                                                .reject{ |e| e.match(/[gcGC]/).nil? }
                                                                .size
-                    gc_percentage = gc_count / window_size.to_f
+                    gc_percentage = gc_count / current_window_size.to_f
 
                     # Store percentage in gc_content_values hash as value with the
                     # range from the start index to the end index as the key
@@ -293,9 +292,9 @@ class CircosGenerator < Sinatra::Base
                 total_seq_length = sequence.length
                 gc_skew_values = {}
 
-                for i in 0..(total_seq_length / window_size)
-                    start_index = i == 0 ? 0 : i * window_size + 1
-                    end_index = [(i + 1) * window_size, total_seq_length - 1].min
+                for i in 0..(total_seq_length / default_window_size)
+                    start_index = i == 0 ? 0 : i * default_window_size + 1
+                    end_index = [(i + 1) * default_window_size, total_seq_length - 1].min
 
                     g_count = sequence[start_index..end_index].chars
                                                               .reject{ |e| e.match(/[gG]/).nil? }
@@ -481,7 +480,7 @@ class CircosGenerator < Sinatra::Base
                         plot_data['r1'] = "#{(current_radius -= (0.01 + track_buffer)).round(2)}r"
                         plot_data['r0'] = "#{(current_radius -= (0.10 + track_buffer)).round(2)}r"
 
-                        plot_data['min'] = feature_type == 'gc_skew' ? -1.0 : 0.0
+                        plot_data['min'] = feature_type == 'gc_skew' ? '-1.0' : '0.0'
                         plot_data['max'] = 1.0
 
                         plot_data['extendbin'] = "extend_bin = no" if plot_type == 'histogram'
