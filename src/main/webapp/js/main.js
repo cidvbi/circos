@@ -42,21 +42,26 @@ $(document).ready(function() {
                 processData: false
             })
             .done(function(response) {
-                var image_file = "images/"+response+"/circos.svg";
-                circos_result.html(
-                    "<h2>Your generated Circos plot:</h2> \
-                    <object type=\"image/svg+xml\" data=\""+image_file+"\"> \
-                        Your browser does not support SVG. \
-                    </object>"
-                );
+            	var circos_map = $("#circosmap");
+                var image_file = "../images/"+response+"/circos.svg";
+                var image_map = "../images/"+response+"/circos.html";
+                circos_result.html("");
+                circos_result.load(image_map, function() {
+//                	circos_result.append($(this).html());
+                	circos_result.append(
+                		"<h2>Your generated Circos plot:</h2>" +
+                		"<img src=\"../images/"+response+"/circos.svg\" usemap=\"#circosmap\">"
+                	);                	
+                });
             })
             .fail(function() {
                 $("#errorMessage").html("The Circos image could not be created");
+                circos_result.html("");
             })
             .always(function() {
                 $("#go").removeAttr("disabled");
             });
-            circos_result.html("<h2>Circos image is being generated...</h2>");
+            circos_result.append("<h2>Circos image is being generated...</h2>");
         }
         e.preventDefault();
         return false;

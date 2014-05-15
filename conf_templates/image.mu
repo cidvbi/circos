@@ -14,3 +14,6 @@ angle_offset      = -90
 
 auto_alpha_colors = yes
 auto_alpha_steps  = 5
+
+image_map_use      = yes
+image_map_name     = circosmap

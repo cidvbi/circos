@@ -19,7 +19,7 @@
                 <label for="gid">GID:</label>
                 <input name="gid" id="gid" type="text" value=87468 />
                 <br><br><hr>
-                <h2>2. Default Data Tracks:</h2>
+                <h2>2. Default Data Tracks</h2>
                 <%
                    // Generate checkboxes for each data option
                    ArrayList<String> fields = new ArrayList<String>();
@@ -39,13 +39,14 @@
                 <input name="gc_skew" id="gc_skew" type="checkbox" onclick="addGCSkewDropdown();">
                 <label for="gc_skew">Include track for GC Skew?</label>
                 <div id="gc_skew_dropdown"></div>
-                <br><hr><br>
+                <br><hr>
+                <h2>3. Custom Data Tracks</h2>
                 <input name="add_custom_track" id="add_custom_track" type="checkbox" onclick="firstCustomTrack();"/>
                 <label for="add_custom_track">Custom Tracks?</label>
                 <div id="custom_tracks"><br></div>
                 <hr>
                 <div>
-                    <h2>3. Image Customization:</h2>
+                    <h2>4. Image Customization:</h2>
                     <input name="include_outer_track" id="include_outer_track" type="checkbox" checked="checked" />
                     <label for="include_outer_track">Include outer track?</label>
                     <br>
@@ -70,7 +71,7 @@
                 </div>
             </div>
             <div id="right_side">
-                <h2>4. Upload your own data files</h2>
+                <h2>5. Upload your own data files</h2>
                 <h4>Your files will be used in conjunction with PATRIC's own data for the GID you enter to the left.</h4>
                 <label for="file_chooser">Upload files:</label>
                 <input name="file_chooser[]" id="file_chooser" type="file" multiple>
@@ -103,7 +104,6 @@ AZJI01000004    713       901       0.39
         </form>
     </div>
     <br><hr><br>
-    <div id="circos_result">
-    </div>
+    <div id="circos_result"></div>
 </body>
 </html>
