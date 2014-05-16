@@ -30,8 +30,6 @@ import org.apache.solr.client.solrj.impl.HttpSolrServer;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrDocumentList;
-import org.json.simple.JSONArray;
-import org.json.simple.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,7 +63,6 @@ public class CircosGenerator {
 		}
 		else {
 			String uuid = null;
-			// FileUtils.rm_rf(Dir.glob('circos_data/*'))
 
 			// Record whether to include GC content track or not
 			if (parameters.containsKey("gc_content_plot_type")) {
@@ -89,19 +86,17 @@ public class CircosGenerator {
 			}
 
 			// Collect genome data using Solr API for PATRIC
-			JSONObject genomeData = getGenomeData(parameters);
+			Map<String, List<Map<String, Object>>> genomeData = getGenomeData(parameters);
 
 			if (genomeData == null || genomeData.isEmpty()) {
 				logger.error("No genome data found for GID {}", parameters.get("gid"));
 				return null;
 			}
 
-			// Run 'uuidgen' command to create a random string to name temp directory
-			// for the circos image and data files
+			// Create a random string to name temp directory for the circos image and data files
 			uuid = UUID.randomUUID().toString().replace("-", "");
 
 			String folderName = parameters.get("realpath") + "/images/" + uuid;
-			logger.info("folderName: {}", folderName);
 			// Create temp directory for this image's data
 			try {
 				Files.createDirectory(Paths.get(folderName));
@@ -113,14 +108,6 @@ public class CircosGenerator {
 			// Create data and config files for Circos
 			createCircosDataFiles(folderName, parameters, genomeData);
 			createCircosConfigFiles(folderName, genomeData);
-
-			// Create directory to store final image
-			// try {
-			// Files.createDirectory(Paths.get("public/images/" + uuid));
-			// }
-			// catch (IOException e) {
-			// e.printStackTrace();
-			// }
 
 			logger.info("Starting Circos script...");
 
@@ -143,7 +130,7 @@ public class CircosGenerator {
 	}
 
 	@SuppressWarnings("unchecked")
-	private JSONObject getGenomeData(Map<?, ?> parameters) {
+	private Map<String, List<Map<String, Object>>> getGenomeData(Map<?, ?> parameters) {
 		// Hash for query strings of each feature type. Lookup is based on the
 		// first half of the parameter's name,
 		// e.g. cds_forward's lookup is "cds"
@@ -159,7 +146,7 @@ public class CircosGenerator {
 		SolrServer solrServer = new HttpSolrServer("http://macleod.vbi.vt.edu:8983/solr/dnafeature");
 
 		// Hash to store JSON response data from Solr
-		JSONObject genomeData = new JSONObject();
+		Map<String, List<Map<String, Object>>> genomeData = new LinkedHashMap<String, List<Map<String, Object>>>();
 
 		List<String> parameterNames = new ArrayList<String>();
 		parameterNames.addAll(Arrays
@@ -193,11 +180,11 @@ public class CircosGenerator {
 			// Pull out only the gene data from the JSON response
 			try {
 				logger.info("Requesting feature data from URL {}", queryData.getQuery());
-				JSONArray docs = new JSONArray();
+				List<Map<String, Object>> docs = new LinkedList<Map<String, Object>>();
 				QueryResponse qr = solrServer.query(queryData, SolrRequest.METHOD.POST);
 				SolrDocumentList sdl = qr.getResults();
 				for (SolrDocument sd : sdl) {
-					JSONObject doc = new JSONObject();
+					HashMap<String, Object> doc = new HashMap<String, Object>();
 					doc.put("accession", sd.get("accession"));
 					doc.put("start_max", sd.get("start_max"));
 					doc.put("end_min", sd.get("end_min"));
@@ -257,13 +244,12 @@ public class CircosGenerator {
 
 			try {
 				logger.info("Requesting feature data from URL {}", queryData.getQuery());
-				JSONArray docs = new JSONArray();
+				List<Map<String, Object>> docs = new LinkedList<Map<String, Object>>();
 				QueryResponse qr = solrServer.query(queryData, SolrRequest.METHOD.POST);
 				SolrDocumentList sdl = qr.getResults();
 				for (SolrDocument sd : sdl) {
-					JSONObject doc = new JSONObject();
-					// doc.putAll(sd.getFieldValueMap());
-					doc.put("accession", sd.get("accession"));
+					Map<String, Object> doc = new HashMap<String, Object>();
+					doc.put("accession", sd.get("accession").toString());
 					doc.put("start_max", sd.get("start_max"));
 					doc.put("end_min", sd.get("end_min"));
 					doc.put("sequence_info_id", sd.get("sequence_info_id"));
@@ -280,7 +266,7 @@ public class CircosGenerator {
 		return genomeData;
 	}
 
-	private boolean createCircosDataFiles(String folderName, Map<?, ?> parameters, JSONObject genomeData) {
+	private boolean createCircosDataFiles(String folderName, Map<?, ?> parameters, Map<String, List<Map<String, Object>>> genomeData) {
 
 		// Create folder for all data files
 		try {
@@ -291,12 +277,12 @@ public class CircosGenerator {
 		}
 
 		String genome = null;
-		JSONArray accessions = new JSONArray();
+		List<Map<String, Object>> accessions = new LinkedList<Map<String, Object>>();
 		Iterator<?> iter = genomeData.keySet().iterator();
 		while (iter.hasNext()) {
 			// genome_data.each do |feature_type,feature_data| // TODO: review
 			String featureType = (String) iter.next();
-			JSONArray featureData = (JSONArray) genomeData.get(featureType);
+			LinkedList<Map<String, Object>> featureData = (LinkedList<Map<String, Object>>) genomeData.get(featureType);
 
 			// Create a Circos data file for each selected feature
 			logger.info("Writing data file for feature, {}", featureType);
@@ -308,9 +294,7 @@ public class CircosGenerator {
 			f.setWritable(true);
 			try {
 				PrintWriter fWriter = new PrintWriter(f);
-				for (Object obj : featureData) {
-					JSONObject gene = (JSONObject) obj;
-					// genome = gene.get("genome_name").toString();
+				for (Map<String, Object> gene : featureData) {
 					fWriter.format("%s\t%d\t%d\tid=%d\n", gene.get("accession"), gene.get("start_max"), gene.get("end_min"), gene.get("sequence_info_id"));
 				}
 				fWriter.close();
@@ -332,7 +316,7 @@ public class CircosGenerator {
 			qr = solrServer.query(queryData, SolrRequest.METHOD.POST);
 			SolrDocumentList sdl = qr.getResults();
 			for (SolrDocument sd : sdl) {
-				JSONObject doc = new JSONObject();
+				HashMap<String, Object> doc = new HashMap<String, Object>();
 				if (genome == null) {
 					genome = sd.get("genome_name").toString();
 				}
@@ -354,9 +338,7 @@ public class CircosGenerator {
 			File file = new File(folderName + DIR_DATA + "/karyotype.txt");
 			file.setWritable(true);
 			PrintWriter writer = new PrintWriter(file);
-			for (Object obj : accessions) {
-				JSONObject accession = (JSONObject) obj;
-
+			for (Map<String, Object> accession : accessions) {
 				writer.format("chr\t-\t %s\t %s\t 0\t %d\t grey\n", accession.get("accession"), genome.replace(" ", "_"), accession.get("length"));
 				if (gcContentPlotType != null || gcSkewPlotType != null) {
 					accessionSequenceData.put(accession.get("accession").toString(), accession.get("sequence").toString());
@@ -431,7 +413,7 @@ public class CircosGenerator {
 				catch (FileNotFoundException e) {
 					e.printStackTrace();
 				}
-				genomeData.put("gc_content", true);
+				// genomeData.put("gc_content", true);
 			}
 		}
 
@@ -481,7 +463,7 @@ public class CircosGenerator {
 				catch (FileNotFoundException e) {
 					e.printStackTrace();
 				}
-				genomeData.put("gc_skew", true);
+				// genomeData.put("gc_skew", true);
 			}
 		}
 		// Write "large tiles" file
@@ -490,9 +472,7 @@ public class CircosGenerator {
 			File file = new File(folderName + DIR_DATA + "/large.tiles.txt");
 			file.setWritable(true);
 			PrintWriter writer = new PrintWriter(file);
-			for (Object obj : accessions) {
-				JSONObject accession = (JSONObject) obj;
-
+			for (Map<String, Object> accession : accessions) {
 				writer.format("%s\t0\t%d\n", accession.get("accession"), accession.get("length"));
 			}
 			writer.close();
@@ -539,7 +519,7 @@ public class CircosGenerator {
 		return true;
 	}
 
-	private void createCircosConfigFiles(String folderName, JSONObject genomeData) {
+	private void createCircosConfigFiles(String folderName, Map<String, List<Map<String, Object>>> genomeData) {
 		List<String> colors = new LinkedList<String>();
 		colors.addAll(Arrays.asList(new String[] { "vdblue", "vdgreen", "lgreen", "vdred", "lred", "vdpurple", "lpurple", "vdorange", "lorange",
 				"vdyellow", "lyellow" }));
@@ -564,7 +544,6 @@ public class CircosGenerator {
 
 		// Open final plot configuration file for creation
 		try {
-			// File.open("#{folder_name}/circos_configs/plots.conf", "w+") do |file|
 			File file = new File(folderName + DIR_CONFIG + "/plots.conf");
 			file.setWritable(true);
 			PrintWriter writer = new PrintWriter(file);
@@ -582,16 +561,13 @@ public class CircosGenerator {
 				largeTileData.put("thickness", Float.toString((trackThickness / 2)) + "p");
 				largeTileData.put("type", "tile");
 				largeTileData.put("color", colors.remove(0));
-//				colors = colors.subList(1, colors.size() - 1); // colors.shift
 				largeTileData.put("r1", Float.toString(currentRadius) + "r");
 				largeTileData.put("r0", Float.toString((currentRadius -= 0.02)) + "r");
 				largeTileData.put("gid", "232978");
-				// tileplots << largeTileData; // TODO: review this
 				tilePlots.add(largeTileData);
 			}
 			else {
-				// colors.shift;
-				colors = colors.subList(1, colors.size() - 1);
+				colors.remove(0);
 			}
 
 			// Space in between tracks
@@ -601,6 +577,7 @@ public class CircosGenerator {
 
 			// Build hash of plot data for Mustache to render
 			Iterator<String> keys = genomeData.keySet().iterator();
+			String gid = null;
 			while (keys.hasNext()) {
 				String featureType = keys.next();
 				HashMap<String, String> plotData = new HashMap<String, String>();
@@ -629,13 +606,13 @@ public class CircosGenerator {
 						plotData.put("r1", Float.toString(r1) + "r");
 						plotData.put("r0", Float.toString(r0) + "r");
 
+						plotData.put("gid", gid);
 						tilePlots.add(plotData);
 					}
 					else {
 						plotData.put("file", folderName + DIR_DATA + "/" + featureType.replace("_", ".") + ".txt");
 						plotData.put("type", plotType);
 						plotData.put("color", colors.remove(0));
-//						colors = colors.subList(1, colors.size() - 1);
 						float r1 = (currentRadius -= (0.01 + trackBuffer));
 						float r0 = (currentRadius -= (0.10 + trackBuffer));
 						plotData.put("r1", Float.toString(r1) + "r");
@@ -655,22 +632,26 @@ public class CircosGenerator {
 					}
 				}
 				else {
-					JSONArray featureData = (JSONArray) genomeData.get(featureType);
-					Integer gid = (Integer) ((JSONObject)featureData.get(0)).get("gid");
+					// JSONArray featureData = (JSONArray) genomeData.get(featureType);
+					// Integer gid = (Integer) ((JSONObject)featureData.get(0)).get("gid");
+					if (gid == null) {
+						LinkedList<Map<String, Object>> featureData = (LinkedList<Map<String,Object>>) genomeData.get(featureType);
+						HashMap<String, Object> feature = (HashMap<String, Object>) featureData.getFirst();
+						gid = feature.get("gid").toString();
+					}
 					
 					// handle default/custom tracks
 					plotData.put("file", folderName + DIR_DATA + "/" + featureType.replace("_", ".") + ".txt");
 					plotData.put("thickness", Float.toString(trackThickness) + "p");
 					plotData.put("type", "tile");
 					plotData.put("color", colors.remove(0));
-//					colors = colors.subList(1, colors.size() - 1); // color.shift
 					float r1 = (currentRadius -= (0.01 + trackBuffer));
 					float r0 = (currentRadius -= (0.04 + trackBuffer));
 					plotData.put("r1", Float.toString(r1) + "r");
 					plotData.put("r0", Float.toString(r0) + "r");
 					
 					//TODO: change hard-coded value for GID to dynamic one
-					plotData.put("gid", gid.toString());
+					plotData.put("gid", gid);
 					tilePlots.add(plotData);
 				}
 			}

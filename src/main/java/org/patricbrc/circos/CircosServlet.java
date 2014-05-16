@@ -2,7 +2,7 @@ package org.patricbrc.circos;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import javax.servlet.ServletContext;
@@ -33,7 +33,7 @@ public class CircosServlet extends HttpServlet {
 	@Override
 	protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
 
-		HashMap<String, String> parameters = new HashMap<String, String>();
+		LinkedHashMap<String, String> parameters = new LinkedHashMap<String, String>();
 
 		// Parse request before run circosGenerator
 		try {
