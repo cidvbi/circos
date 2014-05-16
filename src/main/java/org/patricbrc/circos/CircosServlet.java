@@ -22,8 +22,6 @@ public class CircosServlet extends HttpServlet {
 
 	private static final long serialVersionUID = 1L;
 
-	CircosGenerator circosGenerator = new CircosGenerator();
-
 	private static final Logger logger = LoggerFactory.getLogger(CircosGenerator.class);
 
 	@Override
@@ -63,6 +61,8 @@ public class CircosServlet extends HttpServlet {
 
 		// Generate Circo Image
 		logger.info("parameters: {}", parameters.toString());
+		
+		CircosGenerator circosGenerator = new CircosGenerator();
 		String imageId = circosGenerator.createCircosImage(parameters);
 		logger.info("imageId:{}", imageId);
 

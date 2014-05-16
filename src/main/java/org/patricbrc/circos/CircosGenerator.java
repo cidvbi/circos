@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -146,7 +147,7 @@ public class CircosGenerator {
 		// Hash for query strings of each feature type. Lookup is based on the
 		// first half of the parameter's name,
 		// e.g. cds_forward's lookup is "cds"
-		Map<String, String> featureTypes = new HashMap<String, String>();
+		LinkedHashMap<String, String> featureTypes = new LinkedHashMap<String, String>();
 		featureTypes.put("cds", "feature_type:CDS");
 		featureTypes.put("rna", "feature_type:*RNA");
 		featureTypes.put("misc", "!(feature_type:*RNA OR feature_type:CDS)");
@@ -182,7 +183,7 @@ public class CircosGenerator {
 			SolrQuery queryData = new SolrQuery();
 			queryData.setQuery("gid:" + gid + " AND strand:\"" + strand + "\"");
 			queryData.setFilterQueries("annotation_f:PATRIC AND " + featureType);
-			queryData.setFields("accession, start_max, end_min");
+			queryData.setFields("accession, start_max, end_min, sequence_info_id, gid");
 			queryData.setSort("accession", SolrQuery.ORDER.asc);
 			queryData.setSort("start_max", SolrQuery.ORDER.asc);
 			queryData.setRows(10000);
@@ -200,6 +201,8 @@ public class CircosGenerator {
 					doc.put("accession", sd.get("accession"));
 					doc.put("start_max", sd.get("start_max"));
 					doc.put("end_min", sd.get("end_min"));
+					doc.put("sequence_info_id", sd.get("sequence_info_id"));
+					doc.put("gid", sd.get("gid"));
 					docs.add(doc);
 				}
 				genomeData.put(parameter, docs);
@@ -263,6 +266,8 @@ public class CircosGenerator {
 					doc.put("accession", sd.get("accession"));
 					doc.put("start_max", sd.get("start_max"));
 					doc.put("end_min", sd.get("end_min"));
+					doc.put("sequence_info_id", sd.get("sequence_info_id"));
+					doc.put("gid", sd.get("gid"));
 					docs.add(doc);
 				}
 				genomeData.put(customTrackName, docs);
@@ -306,7 +311,7 @@ public class CircosGenerator {
 				for (Object obj : featureData) {
 					JSONObject gene = (JSONObject) obj;
 					// genome = gene.get("genome_name").toString();
-					fWriter.format("%s\t%d\t%d\n", gene.get("accession"), gene.get("start_max"), gene.get("end_min"));
+					fWriter.format("%s\t%d\t%d\tid=%d\n", gene.get("accession"), gene.get("start_max"), gene.get("end_min"), gene.get("sequence_info_id"));
 				}
 				fWriter.close();
 			}
@@ -576,10 +581,11 @@ public class CircosGenerator {
 				largeTileData.put("file", folderName + DIR_DATA + "/large.tiles.txt");
 				largeTileData.put("thickness", Float.toString((trackThickness / 2)) + "p");
 				largeTileData.put("type", "tile");
-				largeTileData.put("color", colors.get(0));
-				colors = colors.subList(1, colors.size() - 1); // colors.shift
+				largeTileData.put("color", colors.remove(0));
+//				colors = colors.subList(1, colors.size() - 1); // colors.shift
 				largeTileData.put("r1", Float.toString(currentRadius) + "r");
 				largeTileData.put("r0", Float.toString((currentRadius -= 0.02)) + "r");
+				largeTileData.put("gid", "232978");
 				// tileplots << largeTileData; // TODO: review this
 				tilePlots.add(largeTileData);
 			}
@@ -628,8 +634,8 @@ public class CircosGenerator {
 					else {
 						plotData.put("file", folderName + DIR_DATA + "/" + featureType.replace("_", ".") + ".txt");
 						plotData.put("type", plotType);
-						plotData.put("color", colors.get(0));
-						colors = colors.subList(1, colors.size() - 1);
+						plotData.put("color", colors.remove(0));
+//						colors = colors.subList(1, colors.size() - 1);
 						float r1 = (currentRadius -= (0.01 + trackBuffer));
 						float r0 = (currentRadius -= (0.10 + trackBuffer));
 						plotData.put("r1", Float.toString(r1) + "r");
@@ -649,16 +655,22 @@ public class CircosGenerator {
 					}
 				}
 				else {
+					JSONArray featureData = (JSONArray) genomeData.get(featureType);
+					Integer gid = (Integer) ((JSONObject)featureData.get(0)).get("gid");
+					
 					// handle default/custom tracks
 					plotData.put("file", folderName + DIR_DATA + "/" + featureType.replace("_", ".") + ".txt");
 					plotData.put("thickness", Float.toString(trackThickness) + "p");
 					plotData.put("type", "tile");
-					plotData.put("color", colors.get(0));
-					colors = colors.subList(1, colors.size() - 1); // color.shift
+					plotData.put("color", colors.remove(0));
+//					colors = colors.subList(1, colors.size() - 1); // color.shift
 					float r1 = (currentRadius -= (0.01 + trackBuffer));
 					float r0 = (currentRadius -= (0.04 + trackBuffer));
 					plotData.put("r1", Float.toString(r1) + "r");
 					plotData.put("r0", Float.toString(r0) + "r");
+					
+					//TODO: change hard-coded value for GID to dynamic one
+					plotData.put("gid", gid.toString());
 					tilePlots.add(plotData);
 				}
 			}

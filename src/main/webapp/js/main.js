@@ -47,7 +47,6 @@ $(document).ready(function() {
                 var image_map = "../images/"+response+"/circos.html";
                 circos_result.html("");
                 circos_result.load(image_map, function() {
-//                	circos_result.append($(this).html());
                 	circos_result.append(
                 		"<h2>Your generated Circos plot:</h2>" +
                 		"<img src=\"../images/"+response+"/circos.svg\" usemap=\"#circosmap\">"
