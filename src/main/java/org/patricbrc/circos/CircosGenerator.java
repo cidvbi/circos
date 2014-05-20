@@ -1,9 +1,9 @@
 package org.patricbrc.circos;
 
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileNotFoundException;
+import java.io.BufferedWriter;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Files;
@@ -17,19 +17,12 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.commons.io.IOUtils;
-import org.apache.solr.client.solrj.SolrQuery;
-import org.apache.solr.client.solrj.SolrRequest;
-import org.apache.solr.client.solrj.SolrServer;
-import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.impl.HttpSolrServer;
-import org.apache.solr.client.solrj.response.QueryResponse;
-import org.apache.solr.common.SolrDocument;
-import org.apache.solr.common.SolrDocumentList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,9 +33,11 @@ public class CircosGenerator {
 
 	private static final Logger logger = LoggerFactory.getLogger(CircosGenerator.class);
 
-	private final String DIR_CONFIG = "/circos_configs";
+	private String realPath = "";
 
-	private final String DIR_DATA = "/circos_data";
+	private final String DIR_CONFIG = "/conf";
+
+	private final String DIR_DATA = "/data";
 
 	int imageSize = 1000;
 
@@ -55,6 +50,8 @@ public class CircosGenerator {
 	String gcContentPlotType = null;
 
 	String gcSkewPlotType = null;
+
+	CircosData circosData = new CircosData();
 
 	public String createCircosImage(Map<?, ?> parameters) {
 		if (parameters.isEmpty()) {
@@ -73,7 +70,9 @@ public class CircosGenerator {
 			}
 
 			// Record whether to include outer track or not
-			includeOuterTrack = (parameters.get("include_outer_track").equals("on"));
+			if (parameters.containsKey("include_outer_track")) {
+				includeOuterTrack = (parameters.get("include_outer_track").equals("on"));
+			}
 
 			// Store image size parameter from form
 			if (parameters.containsKey("image_dimensions") && parameters.get("image_dimensions").equals("") == false) {
@@ -95,6 +94,7 @@ public class CircosGenerator {
 
 			// Create a random string to name temp directory for the circos image and data files
 			uuid = UUID.randomUUID().toString().replace("-", "");
+			this.realPath = parameters.get("realpath").toString();
 
 			String folderName = parameters.get("realpath") + "/images/" + uuid;
 			// Create temp directory for this image's data
@@ -107,7 +107,7 @@ public class CircosGenerator {
 
 			// Create data and config files for Circos
 			createCircosDataFiles(folderName, parameters, genomeData);
-			createCircosConfigFiles(folderName, genomeData);
+			createCircosConfigFiles(folderName, parameters, genomeData);
 
 			logger.info("Starting Circos script...");
 
@@ -131,24 +131,18 @@ public class CircosGenerator {
 
 	@SuppressWarnings("unchecked")
 	private Map<String, List<Map<String, Object>>> getGenomeData(Map<?, ?> parameters) {
-		// Hash for query strings of each feature type. Lookup is based on the
-		// first half of the parameter's name,
+		// Hash for query strings of each feature type. Lookup is based on the first half of the parameter's name,
 		// e.g. cds_forward's lookup is "cds"
-		LinkedHashMap<String, String> featureTypes = new LinkedHashMap<String, String>();
+		Map<String, String> featureTypes = new HashMap<>();
 		featureTypes.put("cds", "feature_type:CDS");
 		featureTypes.put("rna", "feature_type:*RNA");
-		featureTypes.put("misc", "!(feature_type:*RNA OR feature_type:CDS)");
+		featureTypes.put("misc", "!(feature_type:*RNA OR feature_type:CDS OR feature_type:source)");
 
-		// Extract genome ID from form data
 		String gid = parameters.get("gid").toString();
 
-		// Build base URL
-		SolrServer solrServer = new HttpSolrServer("http://macleod.vbi.vt.edu:8983/solr/dnafeature");
+		Map<String, List<Map<String, Object>>> genomeData = new LinkedHashMap<>();
 
-		// Hash to store JSON response data from Solr
-		Map<String, List<Map<String, Object>>> genomeData = new LinkedHashMap<String, List<Map<String, Object>>>();
-
-		List<String> parameterNames = new ArrayList<String>();
+		List<String> parameterNames = new ArrayList<>();
 		parameterNames.addAll(Arrays
 				.asList(new String[] { "cds_forward", "cds_reverse", "rna_forward", "rna_reverse", "misc_forward", "misc_reverse" }));
 
@@ -162,45 +156,15 @@ public class CircosGenerator {
 				continue;
 			}
 
-			logger.info("Getting {} data", parameter);
-
 			// Build query string based on user's input
 			String featureType = featureTypes.get(parameter.split("_")[0]);
 			String strand = parameter.split("_")[1].equals("forward") ? "+" : "-";
-			SolrQuery queryData = new SolrQuery();
-			queryData.setQuery("gid:" + gid + " AND strand:\"" + strand + "\"");
-			queryData.setFilterQueries("annotation_f:PATRIC AND " + featureType);
-			queryData.setFields("accession, start_max, end_min, sequence_info_id, gid");
-			queryData.setSort("accession", SolrQuery.ORDER.asc);
-			queryData.setSort("start_max", SolrQuery.ORDER.asc);
-			queryData.setRows(10000);
 
-			// Encode the query as a URL and parse the JSON response into a Ruby
-			// Hash object
-			// Pull out only the gene data from the JSON response
-			try {
-				logger.info("Requesting feature data from URL {}", queryData.getQuery());
-				List<Map<String, Object>> docs = new LinkedList<Map<String, Object>>();
-				QueryResponse qr = solrServer.query(queryData, SolrRequest.METHOD.POST);
-				SolrDocumentList sdl = qr.getResults();
-				for (SolrDocument sd : sdl) {
-					HashMap<String, Object> doc = new HashMap<String, Object>();
-					doc.put("accession", sd.get("accession"));
-					doc.put("start_max", sd.get("start_max"));
-					doc.put("end_min", sd.get("end_min"));
-					doc.put("sequence_info_id", sd.get("sequence_info_id"));
-					doc.put("gid", sd.get("gid"));
-					docs.add(doc);
-				}
-				genomeData.put(parameter, docs);
-			}
-			catch (SolrServerException e) {
-				e.printStackTrace();
-			}
+			genomeData.put(parameter, circosData.getFeatures(gid, featureType, strand, null));
 		}
 
 		// Create a set of all the entered custom track numbers
-		HashSet<Integer> trackNums = new HashSet<Integer>();
+		Set<Integer> trackNums = new HashSet<>();
 		paramKeys = (Iterator<String>) parameters.keySet().iterator();
 		while (paramKeys.hasNext()) {
 			String key = paramKeys.next();
@@ -216,51 +180,24 @@ public class CircosGenerator {
 		for (Integer trackNum : trackNums) {
 			String customTrackName = "custom_track_" + trackNum;
 			String featureType = parameters.get("custom_track_type_" + trackNum).toString();
-
+			String paramStrand = parameters.get("custom_track_strand_" + trackNum).toString();
 			String strand;
-			switch (parameters.get("custom_track_strand_" + trackNum).toString()) {
-			case "forward":
-				strand = " AND strand:\"+\"";
-				break;
-			case "reverse":
-				strand = " AND strand:\"-\"";
-				break;
-			default:
-				strand = "";
-				break;
+			if (paramStrand.equals("forward")) {
+				strand = "+";
+			}
+			else if (paramStrand.equals("reverse")) {
+				strand = "-";
+			}
+			else { // Both
+				strand = null;
 			}
 
-			String keywords = parameters.get("custom_track_keyword_" + trackNum).toString();
-			if (keywords.isEmpty() == false) {
-				keywords = " AND " + keywords;
+			String keywords = null;
+			if (parameters.containsKey("custom_track_keyword_" + trackNum)) {
+				keywords = parameters.get("custom_track_keyword_" + trackNum).toString();
 			}
 
-			SolrQuery queryData = new SolrQuery();
-			queryData.setQuery("gid:" + gid + strand + keywords);
-			queryData.setFilterQueries("annotation_f:PATRIC AND " + featureType);
-			queryData.setSort("accession", SolrQuery.ORDER.asc);
-			queryData.setSort("start_max", SolrQuery.ORDER.asc);
-			queryData.setRows(10000);
-
-			try {
-				logger.info("Requesting feature data from URL {}", queryData.getQuery());
-				List<Map<String, Object>> docs = new LinkedList<Map<String, Object>>();
-				QueryResponse qr = solrServer.query(queryData, SolrRequest.METHOD.POST);
-				SolrDocumentList sdl = qr.getResults();
-				for (SolrDocument sd : sdl) {
-					Map<String, Object> doc = new HashMap<String, Object>();
-					doc.put("accession", sd.get("accession").toString());
-					doc.put("start_max", sd.get("start_max"));
-					doc.put("end_min", sd.get("end_min"));
-					doc.put("sequence_info_id", sd.get("sequence_info_id"));
-					doc.put("gid", sd.get("gid"));
-					docs.add(doc);
-				}
-				genomeData.put(customTrackName, docs);
-			}
-			catch (SolrServerException e) {
-				e.printStackTrace();
-			}
+			genomeData.put(customTrackName, circosData.getFeatures(gid, featureType, strand, keywords));
 		}
 
 		return genomeData;
@@ -276,77 +213,44 @@ public class CircosGenerator {
 			e.printStackTrace();
 		}
 
-		String genome = null;
-		List<Map<String, Object>> accessions = new LinkedList<Map<String, Object>>();
 		Iterator<?> iter = genomeData.keySet().iterator();
 		while (iter.hasNext()) {
-			// genome_data.each do |feature_type,feature_data| // TODO: review
 			String featureType = (String) iter.next();
 			LinkedList<Map<String, Object>> featureData = (LinkedList<Map<String, Object>>) genomeData.get(featureType);
 
 			// Create a Circos data file for each selected feature
 			logger.info("Writing data file for feature, {}", featureType);
 
-			// File name has the following format: feature.strand.txt
-			// e.g. cds.forward.txt, rna.reverse.txt
+			// File name has the following format: feature.strand.txt  e.g. cds.forward.txt, rna.reverse.txt
 			String fileName = featureType.replace("_", ".") + ".txt";
-			File f = new File(folderName + DIR_DATA + "/" + fileName);
-			f.setWritable(true);
-			try {
-				PrintWriter fWriter = new PrintWriter(f);
+			try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_DATA + "/" + fileName)))) {
 				for (Map<String, Object> gene : featureData) {
-					fWriter.format("%s\t%d\t%d\tid=%d\n", gene.get("accession"), gene.get("start_max"), gene.get("end_min"), gene.get("sequence_info_id"));
+					writer.format("%s\t%d\t%d\tid=%d\n", gene.get("accession"), gene.get("start_max"), gene.get("end_min"),
+							gene.get("sequence_info_id"));
 				}
-				fWriter.close();
 			}
-			catch (FileNotFoundException e) {
+			catch (IOException e) {
 				e.printStackTrace();
 			}
 		}
 
-		SolrServer solrServer = new HttpSolrServer("http://macleod.vbi.vt.edu:8983/solr/sequenceinfo");
-		SolrQuery queryData = new SolrQuery();
-		queryData.setQuery("gid:" + parameters.get("gid"));
-		queryData.setFields("genome_name, accession, length, sequence");
-		queryData.setSort("accession", SolrQuery.ORDER.asc);
+		String genome = circosData.getGenomeName(parameters.get("gid").toString());
 
-		logger.info("Requesting accession data from URL: {}", queryData.getQuery());
-		QueryResponse qr;
-		try {
-			qr = solrServer.query(queryData, SolrRequest.METHOD.POST);
-			SolrDocumentList sdl = qr.getResults();
-			for (SolrDocument sd : sdl) {
-				HashMap<String, Object> doc = new HashMap<String, Object>();
-				if (genome == null) {
-					genome = sd.get("genome_name").toString();
-				}
-				doc.put("accession", sd.get("accession"));
-				doc.put("length", sd.get("length"));
-				doc.put("sequence", sd.get("sequence"));
-				accessions.add(doc);
-			}
-		}
-		catch (SolrServerException e) {
-			e.printStackTrace();
-		}
+		List<Map<String, Object>> accessions = circosData.getAccessions(parameters.get("gid").toString());
 
-		HashMap<String, String> accessionSequenceData = new HashMap<String, String>();
+		Map<String, String> accessionSequenceData = new HashMap<>();
 
 		// Write karyotype file
 		logger.info("Creating karyotype file for genome,{}", genome);
-		try {
-			File file = new File(folderName + DIR_DATA + "/karyotype.txt");
-			file.setWritable(true);
-			PrintWriter writer = new PrintWriter(file);
+		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_DATA + "/karyotype.txt")))) {
 			for (Map<String, Object> accession : accessions) {
 				writer.format("chr\t-\t %s\t %s\t 0\t %d\t grey\n", accession.get("accession"), genome.replace(" ", "_"), accession.get("length"));
 				if (gcContentPlotType != null || gcSkewPlotType != null) {
 					accessionSequenceData.put(accession.get("accession").toString(), accession.get("sequence").toString());
 				}
 			}
-			writer.close();
 		}
-		catch (FileNotFoundException e) {
+		catch (IOException e) {
 			e.printStackTrace();
 		}
 
@@ -363,7 +267,7 @@ public class CircosGenerator {
 				String accession = (String) iter.next();
 				String sequence = accessionSequenceData.get(accession);
 				int totalSeqLength = sequence.length();
-				HashMap<String, Float> gcContentValues = new HashMap<String, Float>();
+				Map<String, Float> gcContentValues = new HashMap<>();
 
 				// Iterate over each window_size-sized block and calculate its GC
 				// content.
@@ -395,26 +299,22 @@ public class CircosGenerator {
 				}
 
 				// Write GC content data for this accession
-				try {
-					File file = new File(folderName + DIR_DATA + "/gc.content.txt");
-					file.setWritable(true);
-					PrintWriter writer = new PrintWriter(file);
-					iter = gcContentValues.keySet().iterator();
-					while (iter.hasNext()) {
-						String range = (String) iter.next();
+				try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_DATA + "/gc.content.txt")))) {
+					Iterator<String> iterGC = gcContentValues.keySet().iterator();
+					while (iterGC.hasNext()) {
+						String range = iterGC.next();
 						String strIndex = range.split("\\.\\.")[0];
 						String endIndex = range.split("\\.\\.")[1];
 						float percentage = gcContentValues.get(range);
 						// logger.info("{}, {}, {}", accession, strIndex, endIndex);
 						writer.format("%s\t%s\t%s\t%f\n", accession, strIndex, endIndex, percentage);
 					}
-					writer.close();
 				}
-				catch (FileNotFoundException e) {
+				catch (IOException e) {
 					e.printStackTrace();
 				}
-				// genomeData.put("gc_content", true);
 			}
+			genomeData.put("gc_content", new ArrayList<Map<String,Object>>());
 		}
 
 		// Create GC skew data file
@@ -425,7 +325,7 @@ public class CircosGenerator {
 				String accession = (String) iter.next();
 				String sequence = accessionSequenceData.get(accession);
 				int totalSeqLength = sequence.length();
-				HashMap<String, Float> gcSkewValues = new HashMap<String, Float>();
+				Map<String, Float> gcSkewValues = new HashMap<>();
 
 				for (int i = 0; i < (totalSeqLength / windowSize); i++) {
 					int startIndex = (i == 0) ? 0 : (i * windowSize + 1);
@@ -446,38 +346,31 @@ public class CircosGenerator {
 				}
 
 				// Write GC skew data for this accession
-				try {
-					File file = new File(folderName + DIR_DATA + "/gc.skew.txt");
-					file.setWritable(true);
-					PrintWriter writer = new PrintWriter(file);
-					iter = gcSkewValues.keySet().iterator();
-					while (iter.hasNext()) {
-						String range = (String) iter.next();
+				try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_DATA + "/gc.skew.txt")));) {
+					Iterator<String> iterGC = gcSkewValues.keySet().iterator();
+					while (iterGC.hasNext()) {
+						String range = iterGC.next();
 						String strIndex = range.split("\\.\\.")[0];
 						String endIndex = range.split("\\.\\.")[1];
 						float skew = gcSkewValues.get(range);
 						writer.format("%s\t%s\t%s\t%f\n", accession, strIndex, endIndex, skew);
 					}
-					writer.close();
 				}
-				catch (FileNotFoundException e) {
+				catch (IOException e) {
 					e.printStackTrace();
 				}
-				// genomeData.put("gc_skew", true);
 			}
+			genomeData.put("gc_skew", new ArrayList<Map<String,Object>>());
 		}
 		// Write "large tiles" file
 		logger.info("Creating large tiles file for genome, {}", genome);
-		try {
-			File file = new File(folderName + DIR_DATA + "/large.tiles.txt");
-			file.setWritable(true);
-			PrintWriter writer = new PrintWriter(file);
+		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_DATA + "/large.tiles.txt")))) {
 			for (Map<String, Object> accession : accessions) {
 				writer.format("%s\t0\t%d\n", accession.get("accession"), accession.get("length"));
 			}
 			writer.close();
 		}
-		catch (FileNotFoundException e) {
+		catch (IOException e) {
 			e.printStackTrace();
 		}
 
@@ -519,10 +412,11 @@ public class CircosGenerator {
 		return true;
 	}
 
-	private void createCircosConfigFiles(String folderName, Map<String, List<Map<String, Object>>> genomeData) {
-		List<String> colors = new LinkedList<String>();
+	private void createCircosConfigFiles(String folderName, Map<?, ?> parameters, Map<String, List<Map<String, Object>>> genomeData) {
+		List<String> colors = new LinkedList<>();
 		colors.addAll(Arrays.asList(new String[] { "vdblue", "vdgreen", "lgreen", "vdred", "lred", "vdpurple", "lpurple", "vdorange", "lorange",
 				"vdyellow", "lyellow" }));
+		String gId = parameters.get("gid").toString();
 
 		// Create folder for config files
 		try {
@@ -534,8 +428,8 @@ public class CircosGenerator {
 
 		// Copy static conf files to image's temp directory
 		try {
-			Files.copy(Paths.get("conf_templates/ideogram.conf"), Paths.get(folderName + DIR_CONFIG + "/ideogram.conf"));
-			Files.copy(Paths.get("conf_templates/ticks.conf"), Paths.get(folderName + DIR_CONFIG + "/ticks.conf"));
+			Files.copy(Paths.get(this.realPath + "/conf_templates/ideogram.conf"), Paths.get(folderName + DIR_CONFIG + "/ideogram.conf"));
+			Files.copy(Paths.get(this.realPath + "/conf_templates/ticks.conf"), Paths.get(folderName + DIR_CONFIG + "/ticks.conf"));
 		}
 		catch (IOException e) {
 			e.printStackTrace();
@@ -543,12 +437,8 @@ public class CircosGenerator {
 		logger.info("Writing config file for plots");
 
 		// Open final plot configuration file for creation
-		try {
-			File file = new File(folderName + DIR_CONFIG + "/plots.conf");
-			file.setWritable(true);
-			PrintWriter writer = new PrintWriter(file);
-
-			ArrayList<HashMap<String, String>> tilePlots = new ArrayList<HashMap<String, String>>();
+		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_CONFIG + "/plots.conf")))) {
+			List<Map<String, String>> tilePlots = new ArrayList<>();
 			float currentRadius = 1.0f;
 			float trackThickness = imageSize * trackWidth;
 
@@ -556,14 +446,14 @@ public class CircosGenerator {
 			// genomic data
 
 			if (includeOuterTrack) {
-				HashMap<String, String> largeTileData = new HashMap<String, String>();
+				Map<String, String> largeTileData = new HashMap<>();
 				largeTileData.put("file", folderName + DIR_DATA + "/large.tiles.txt");
 				largeTileData.put("thickness", Float.toString((trackThickness / 2)) + "p");
 				largeTileData.put("type", "tile");
 				largeTileData.put("color", colors.remove(0));
 				largeTileData.put("r1", Float.toString(currentRadius) + "r");
 				largeTileData.put("r0", Float.toString((currentRadius -= 0.02)) + "r");
-				largeTileData.put("gid", "232978");
+				largeTileData.put("gid", gId);
 				tilePlots.add(largeTileData);
 			}
 			else {
@@ -573,14 +463,14 @@ public class CircosGenerator {
 			// Space in between tracks
 			float trackBuffer = trackWidth - 0.03f;
 
-			ArrayList<HashMap<String, String>> nonTilePlots = new ArrayList<HashMap<String, String>>();
+			List<Map<String, String>> nonTilePlots = new ArrayList<>();
 
 			// Build hash of plot data for Mustache to render
 			Iterator<String> keys = genomeData.keySet().iterator();
-			String gid = null;
 			while (keys.hasNext()) {
 				String featureType = keys.next();
-				HashMap<String, String> plotData = new HashMap<String, String>();
+				// logger.info(featureType);
+				Map<String, String> plotData = new HashMap<>();
 
 				// Handle user uploaded files
 				if (featureType.contains("user_upload")) {
@@ -606,7 +496,7 @@ public class CircosGenerator {
 						plotData.put("r1", Float.toString(r1) + "r");
 						plotData.put("r0", Float.toString(r0) + "r");
 
-						plotData.put("gid", gid);
+						plotData.put("gid", gId);
 						tilePlots.add(plotData);
 					}
 					else {
@@ -632,14 +522,6 @@ public class CircosGenerator {
 					}
 				}
 				else {
-					// JSONArray featureData = (JSONArray) genomeData.get(featureType);
-					// Integer gid = (Integer) ((JSONObject)featureData.get(0)).get("gid");
-					if (gid == null) {
-						LinkedList<Map<String, Object>> featureData = (LinkedList<Map<String,Object>>) genomeData.get(featureType);
-						HashMap<String, Object> feature = (HashMap<String, Object>) featureData.getFirst();
-						gid = feature.get("gid").toString();
-					}
-					
 					// handle default/custom tracks
 					plotData.put("file", folderName + DIR_DATA + "/" + featureType.replace("_", ".") + ".txt");
 					plotData.put("thickness", Float.toString(trackThickness) + "p");
@@ -649,65 +531,43 @@ public class CircosGenerator {
 					float r0 = (currentRadius -= (0.04 + trackBuffer));
 					plotData.put("r1", Float.toString(r1) + "r");
 					plotData.put("r0", Float.toString(r0) + "r");
-					
-					//TODO: change hard-coded value for GID to dynamic one
-					plotData.put("gid", gid);
+					plotData.put("gid", gId);
 					tilePlots.add(plotData);
 				}
 			}
 
 			// Render plots config file using template
-			// file.write(Mustache.render(File.read("conf_templates/plots.mu"), :tileplots => tileplots, :nontileplots => nontileplots))
-			Template tmpl = Mustache.compiler().compile(new FileReader("conf_templates/plots.mu"));
-			HashMap<String, ArrayList<HashMap<String, String>>> data = new HashMap<String, ArrayList<HashMap<String, String>>>();
+			Template tmpl = Mustache.compiler().compile(new FileReader(this.realPath + "/conf_templates/plots.mu"));
+			Map<String, List<Map<String, String>>> data = new HashMap<>();
 			data.put("tileplots", tilePlots);
 			data.put("nontileplots", nonTilePlots);
 			tmpl.execute(data, writer);
-			writer.close();
 		}
 		catch (IOException e) {
 			logger.error(e.getMessage());
 			e.printStackTrace();
 		}
 
-		// Split out the UUID from the folder name to obfuscate the final image's
-		// path as well
-		// String imageId = folderName.substring(folderName.lastIndexOf("/"));
-		// logger.info("Writing config file for image {}", imageId);
-
 		// Open final image configuration file for creation
-		try {
-			File file = new File(folderName + DIR_CONFIG + "/image.conf");
-			file.setWritable(true);
-			PrintWriter writer = new PrintWriter(file);
-
-			Template tmpl = Mustache.compiler().compile(new BufferedReader(new FileReader("conf_templates/image.mu")));
+		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_CONFIG + "/image.conf")))) {
+			Template tmpl = Mustache.compiler().compile(new BufferedReader(new FileReader(this.realPath + "/conf_templates/image.mu")));
 			Map<String, String> data = new HashMap<String, String>();
 			data.put("path", folderName);
 			data.put("image_size", Integer.toString(imageSize));
 			tmpl.execute(data, writer);
-			writer.close();
 		}
-		catch (FileNotFoundException e) {
+		catch (IOException e) {
 			e.printStackTrace();
 		}
 
-		logger.info("Writing main config file for Circos");
-
 		// Open final circos configuration file for creation
-		try {
-			File file = new File(folderName + DIR_CONFIG + "/circos.conf");
-			file.setWritable(true);
-			PrintWriter writer = new PrintWriter(file);
-
-			Template tmpl = Mustache.compiler().compile(new BufferedReader(new FileReader("conf_templates/circos.mu")));
+		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_CONFIG + "/circos.conf")))) {
+			Template tmpl = Mustache.compiler().compile(new BufferedReader(new FileReader(this.realPath + "/conf_templates/circos.mu")));
 			Map<String, String> data = new HashMap<String, String>();
 			data.put("folder", folderName);
-			// Render main circos config file using template
 			tmpl.execute(data, writer);
-			writer.close();
 		}
-		catch (FileNotFoundException e) {
+		catch (IOException e) {
 			e.printStackTrace();
 		}
 	}
