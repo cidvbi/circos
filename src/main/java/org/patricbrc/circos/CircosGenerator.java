@@ -2,6 +2,7 @@ package org.patricbrc.circos;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -18,7 +19,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -33,89 +33,92 @@ public class CircosGenerator {
 
 	private static final Logger logger = LoggerFactory.getLogger(CircosGenerator.class);
 
-	private String realPath = "";
-
 	private final String DIR_CONFIG = "/conf";
 
 	private final String DIR_DATA = "/data";
 
-	int imageSize = 1000;
+	private String appDir;
 
-	boolean includeOuterTrack = false;
+	private Template tmplPlotConf;
 
-	float trackWidth = 0.03f;
+	private Template tmplImageConf;
 
-	String filePlotTypes = "tiles";
+	private Template tmplCircosConf;
 
-	String gcContentPlotType = null;
+	CircosData circosData;
 
-	String gcSkewPlotType = null;
+	public CircosGenerator(String path) {
+		appDir = path;
+		circosData = new CircosData();
+		try {
+			tmplPlotConf = Mustache.compiler().compile(new BufferedReader(new FileReader(path + "/conf_templates/plots.mu")));
+			tmplImageConf = Mustache.compiler().compile(new BufferedReader(new FileReader(path + "/conf_templates/image.mu")));
+			tmplCircosConf = Mustache.compiler().compile(new BufferedReader(new FileReader(path + "/conf_templates/circos.mu")));
+		}
+		catch (FileNotFoundException e) {
+			e.printStackTrace();
+		}
+	}
 
-	CircosData circosData = new CircosData();
-
-	public String createCircosImage(Map<?, ?> parameters) {
+	public String createCircosImage(Map<String, String> parameters) {
 		if (parameters.isEmpty()) {
 			logger.error("Circos image could not be created");
 			return null;
 		}
 		else {
-			String uuid = null;
+			// create instance
+			Circos circos = new Circos(appDir);
+			circos.setGenomeId(parameters.get("gid"));
 
 			// Record whether to include GC content track or not
 			if (parameters.containsKey("gc_content_plot_type")) {
-				gcContentPlotType = parameters.get("gc_content_plot_type").toString();
+				circos.setGcContentPlotType(parameters.get("gc_content_plot_type"));
 			}
 			if (parameters.containsKey("gc_skew_plot_type")) {
-				gcSkewPlotType = parameters.get("gc_skew_plot_type").toString();
+				circos.setGcSkewPlotType(parameters.get("gc_skew_plot_type"));
 			}
 
 			// Record whether to include outer track or not
 			if (parameters.containsKey("include_outer_track")) {
-				includeOuterTrack = (parameters.get("include_outer_track").equals("on"));
+				circos.setIncludeOuterTrack(parameters.get("include_outer_track").equals("on"));
 			}
 
 			// Store image size parameter from form
 			if (parameters.containsKey("image_dimensions") && parameters.get("image_dimensions").equals("") == false) {
-				imageSize = Integer.parseInt(parameters.get("image_dimensions").toString());
+				circos.setImageSize(Integer.parseInt(parameters.get("image_dimensions")));
 			}
 
 			// Convert track width parameter to percentage and store it
 			if (parameters.containsKey("track_width")) {
-				trackWidth = (float) (Integer.parseInt(parameters.get("track_width").toString()) / 100.0);
+				circos.setTrackWidth((float) (Integer.parseInt(parameters.get("track_width")) / 100.0));
 			}
 
 			// Collect genome data using Solr API for PATRIC
-			Map<String, List<Map<String, Object>>> genomeData = getGenomeData(parameters);
-
-			if (genomeData == null || genomeData.isEmpty()) {
+			circos.setGenomeData(this.getGenomeData(parameters));
+			if (circos.getGenomeData() == null || circos.getGenomeData().isEmpty()) {
 				logger.error("No genome data found for GID {}", parameters.get("gid"));
 				return null;
 			}
 
-			// Create a random string to name temp directory for the circos image and data files
-			uuid = UUID.randomUUID().toString().replace("-", "");
-			this.realPath = parameters.get("realpath").toString();
-
-			String folderName = parameters.get("realpath") + "/images/" + uuid;
 			// Create temp directory for this image's data
+			String tmpFolderName = circos.getTmpDir();
 			try {
-				Files.createDirectory(Paths.get(folderName));
+				Files.createDirectory(Paths.get(tmpFolderName));
 			}
 			catch (IOException e) {
 				e.printStackTrace();
+				return null;
 			}
 
 			// Create data and config files for Circos
-			createCircosDataFiles(folderName, parameters, genomeData);
-			createCircosConfigFiles(folderName, parameters, genomeData);
-
-			logger.info("Starting Circos script...");
+			createCircosDataFiles(circos);
+			createCircosConfigFiles(circos);
 
 			// Run Circos script to generate final image
 			// `circos -conf #{folder_name}/circos_configs/circos.conf -debug_group summary,timer > circos.log.out`
-			String command = "circos -conf " + folderName + DIR_CONFIG + "/circos.conf -debug_group summary,timer";
+			String command = "circos -conf " + tmpFolderName + DIR_CONFIG + "/circos.conf -debug_group summary,timer";
 			try {
-				logger.info("running command: " + command);
+				logger.info("Starting Circos script: " + command);
 				Process p = Runtime.getRuntime().exec(command);
 				p.waitFor();
 				logger.info(IOUtils.toString(p.getInputStream()));
@@ -125,105 +128,92 @@ public class CircosGenerator {
 			}
 			logger.info("Circos image was created successfully!");
 
-			return uuid;
+			return circos.getUuid();
 		}
 	}
 
-	@SuppressWarnings("unchecked")
-	private Map<String, List<Map<String, Object>>> getGenomeData(Map<?, ?> parameters) {
-		// Hash for query strings of each feature type. Lookup is based on the first half of the parameter's name,
-		// e.g. cds_forward's lookup is "cds"
-		Map<String, String> featureTypes = new HashMap<>();
-		featureTypes.put("cds", "feature_type:CDS");
-		featureTypes.put("rna", "feature_type:*RNA");
-		featureTypes.put("misc", "!(feature_type:*RNA OR feature_type:CDS OR feature_type:source)");
-
-		String gid = parameters.get("gid").toString();
-
+	private Map<String, List<Map<String, Object>>> getGenomeData(Map<String, String> parameters) {
+		String gId = parameters.get("gid");
+		List<String> defaultDataTracks = new ArrayList<>();
+		defaultDataTracks.addAll(Arrays.asList(new String[] { "cds_forward", "cds_reverse", "rna_forward", "rna_reverse", "misc_forward",
+				"misc_reverse" }));
 		Map<String, List<Map<String, Object>>> genomeData = new LinkedHashMap<>();
-
-		List<String> parameterNames = new ArrayList<>();
-		parameterNames.addAll(Arrays
-				.asList(new String[] { "cds_forward", "cds_reverse", "rna_forward", "rna_reverse", "misc_forward", "misc_reverse" }));
 
 		// Iterate over each checked off data type
 		Iterator<String> paramKeys = (Iterator<String>) parameters.keySet().iterator();
 		while (paramKeys.hasNext()) {
 			String parameter = paramKeys.next();
-
 			// Skip over parameters that aren't track types
-			if (parameterNames.contains(parameter) == false) {
+			if (defaultDataTracks.contains(parameter) == false) {
 				continue;
 			}
-
 			// Build query string based on user's input
-			String featureType = featureTypes.get(parameter.split("_")[0]);
+			String featureType = parameter.split("_")[0];
 			String strand = parameter.split("_")[1].equals("forward") ? "+" : "-";
 
-			genomeData.put(parameter, circosData.getFeatures(gid, featureType, strand, null));
+			genomeData.put(parameter, circosData.getFeatures(gId, featureType, strand, null));
 		}
 
 		// Create a set of all the entered custom track numbers
+		// parameters.keys.select{ |e| /custom_track_.*/.match e }.each { |parameter| track_nums << parameter[/.*_(\d+)$/, 1] }
 		Set<Integer> trackNums = new HashSet<>();
 		paramKeys = (Iterator<String>) parameters.keySet().iterator();
 		while (paramKeys.hasNext()) {
 			String key = paramKeys.next();
-			if (key.matches(".*_(\\d+)$")) {
+			if (key.matches("custom_track_.*_(\\d+)$")) {
 				int num = Integer.parseInt(key.substring(key.lastIndexOf("_") + 1));
 				logger.info("{} matches {}", key, num);
 				trackNums.add(num);
 			}
 		}
-		// parameters.keys.select{ |e| /custom_track_.*/.match e }.each { |parameter| track_nums << parameter[/.*_(\d+)$/, 1] }
 
 		// Gather data for each custom track
 		for (Integer trackNum : trackNums) {
 			String customTrackName = "custom_track_" + trackNum;
-			String featureType = parameters.get("custom_track_type_" + trackNum).toString();
-			String paramStrand = parameters.get("custom_track_strand_" + trackNum).toString();
+			String featureType = parameters.get("custom_track_type_" + trackNum);
+			String paramStrand = parameters.get("custom_track_strand_" + trackNum);
 			String strand;
-			if (paramStrand.equals("forward")) {
+			switch (paramStrand) {
+			case "forward":
 				strand = "+";
-			}
-			else if (paramStrand.equals("reverse")) {
+				break;
+			case "reverse":
 				strand = "-";
-			}
-			else { // Both
+				break;
+			default:
 				strand = null;
 			}
-
 			String keywords = null;
 			if (parameters.containsKey("custom_track_keyword_" + trackNum)) {
-				keywords = parameters.get("custom_track_keyword_" + trackNum).toString();
+				keywords = parameters.get("custom_track_keyword_" + trackNum);
 			}
-
-			genomeData.put(customTrackName, circosData.getFeatures(gid, featureType, strand, keywords));
+			genomeData.put(customTrackName, circosData.getFeatures(gId, featureType, strand, keywords));
 		}
-
 		return genomeData;
 	}
 
-	private boolean createCircosDataFiles(String folderName, Map<?, ?> parameters, Map<String, List<Map<String, Object>>> genomeData) {
+	private void createCircosDataFiles(Circos circos) {
 
 		// Create folder for all data files
+		String dirData = circos.getTmpDir() + DIR_DATA;
 		try {
-			Files.createDirectory(Paths.get(folderName + DIR_DATA));
+			Files.createDirectory(Paths.get(dirData));
 		}
 		catch (IOException e) {
 			e.printStackTrace();
 		}
-
-		Iterator<?> iter = genomeData.keySet().iterator();
+		Map<String, List<Map<String, Object>>> genomeData = circos.getGenomeData();
+		Iterator<String> iter = genomeData.keySet().iterator();
 		while (iter.hasNext()) {
-			String featureType = (String) iter.next();
-			LinkedList<Map<String, Object>> featureData = (LinkedList<Map<String, Object>>) genomeData.get(featureType);
+			String track = iter.next();
+			List<Map<String, Object>> featureData = genomeData.get(track);
 
 			// Create a Circos data file for each selected feature
-			logger.info("Writing data file for feature, {}", featureType);
+			logger.info("Writing data file for track, {}", track);
 
-			// File name has the following format: feature.strand.txt  e.g. cds.forward.txt, rna.reverse.txt
-			String fileName = featureType.replace("_", ".") + ".txt";
-			try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_DATA + "/" + fileName)))) {
+			// File name has the following format: feature.strand.txt e.g. cds.forward.txt, rna.reverse.txt
+			String fileName = "/" + track.replace("_", ".") + ".txt";
+			try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + fileName)))) {
 				for (Map<String, Object> gene : featureData) {
 					writer.format("%s\t%d\t%d\tid=%d\n", gene.get("accession"), gene.get("start_max"), gene.get("end_min"),
 							gene.get("sequence_info_id"));
@@ -234,18 +224,18 @@ public class CircosGenerator {
 			}
 		}
 
-		String genome = circosData.getGenomeName(parameters.get("gid").toString());
+		String genome = circosData.getGenomeName(circos.getGenomeId());
 
-		List<Map<String, Object>> accessions = circosData.getAccessions(parameters.get("gid").toString());
+		List<Map<String, Object>> accessions = circosData.getAccessions(circos.getGenomeId());
 
 		Map<String, String> accessionSequenceData = new HashMap<>();
 
 		// Write karyotype file
 		logger.info("Creating karyotype file for genome,{}", genome);
-		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_DATA + "/karyotype.txt")))) {
+		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + "/karyotype.txt")))) {
 			for (Map<String, Object> accession : accessions) {
 				writer.format("chr\t-\t %s\t %s\t 0\t %d\t grey\n", accession.get("accession"), genome.replace(" ", "_"), accession.get("length"));
-				if (gcContentPlotType != null || gcSkewPlotType != null) {
+				if (circos.getGcContentPlotType() != null || circos.getGcSkewPlotType() != null) {
 					accessionSequenceData.put(accession.get("accession").toString(), accession.get("sequence").toString());
 				}
 			}
@@ -255,35 +245,33 @@ public class CircosGenerator {
 		}
 
 		// Default window size for GC calculations
-		int windowSize = 2000;
+		int defaultWindowSize = 2000;
 
 		// Create GC content data file
-		if (gcContentPlotType != null) {
+		if (circos.getGcContentPlotType() != null) {
 			logger.info("Creating data file for GC content");
 
 			// accession_sequence_data.each do |accession,sequence|
 			iter = accessionSequenceData.keySet().iterator();
 			while (iter.hasNext()) {
-				String accession = (String) iter.next();
+				String accession = iter.next();
 				String sequence = accessionSequenceData.get(accession);
 				int totalSeqLength = sequence.length();
-				Map<String, Float> gcContentValues = new HashMap<>();
+				Map<String, Float> gcContentValues = new LinkedHashMap<>();
 
-				// Iterate over each window_size-sized block and calculate its GC
-				// content.
-				// For instance, if the sequence length were 1,234,567 and the
-				// window size were 1000, we would iterate 1234 times, with the
-				// last iteration being the window from 1,234,001 to 1,234,566
-				for (int i = 0; i < (totalSeqLength / windowSize); i++) {
+				// Iterate over each window_size-sized block and calculate its GC content.
+				// For instance, if the sequence length were 1,234,567 and the window size were 1000, we would iterate 1234 times, with the last
+				// iteration being the window from 1,234,001 to 1,234,566
+				for (int i = 0; i < (totalSeqLength / defaultWindowSize); i++) {
 
-					// Only use 0 as start index for first iteration, otherwise
-					// with a window_size of 1000, start should be something like
-					// 1001, 2001, and so on.
-					int startIndex = (i == 0) ? 0 : (i * windowSize + 1);
+					// Only use 0 as start index for first iteration, otherwise with a window_size of 1000, start should be something like 1001, 2001,
+					// and so on.
+					int startIndex = (i == 0) ? 0 : (i * defaultWindowSize + 1);
 
-					// End index should either be 'window_size' greater than the start or
-					// if we are at the last iteration, the end of the sequence.
-					int endIndex = Math.min((i + 1) * windowSize, totalSeqLength - 1);
+					// End index should either be 'window_size' greater than the start or if we are at the last iteration, the end of the sequence.
+					int endIndex = Math.min((i + 1) * defaultWindowSize, totalSeqLength - 1);
+
+					int currentWindowSize = endIndex - startIndex;
 
 					// Store number of 'g' and 'c' characters from the sequence
 					Pattern pattern = Pattern.compile("[gcGC]");
@@ -291,15 +279,14 @@ public class CircosGenerator {
 					int gcCount;
 					for (gcCount = 0; matcher.find(); gcCount++)
 						;
-					float gcPercentage = (gcCount / (float) windowSize);
+					float gcPercentage = (gcCount / (float) currentWindowSize);
 
-					// Store percentage in gc_content_values hash as value with the
-					// range from the start index to the end index as the key
+					// Store percentage in gc_content_values hash as value with the range from the start index to the end index as the key
 					gcContentValues.put(startIndex + ".." + endIndex, gcPercentage); // .round(5)
 				}
 
 				// Write GC content data for this accession
-				try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_DATA + "/gc.content.txt")))) {
+				try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + "/gc.content.txt")))) {
 					Iterator<String> iterGC = gcContentValues.keySet().iterator();
 					while (iterGC.hasNext()) {
 						String range = iterGC.next();
@@ -314,22 +301,22 @@ public class CircosGenerator {
 					e.printStackTrace();
 				}
 			}
-			genomeData.put("gc_content", new ArrayList<Map<String,Object>>());
+			genomeData.put("gc_content", new ArrayList<Map<String, Object>>());
 		}
 
 		// Create GC skew data file
-		if (gcSkewPlotType != null) {
+		if (circos.getGcSkewPlotType() != null) {
 			logger.info("Creating data file for GC skew");
 			iter = accessionSequenceData.keySet().iterator();
 			while (iter.hasNext()) {
-				String accession = (String) iter.next();
+				String accession = iter.next();
 				String sequence = accessionSequenceData.get(accession);
 				int totalSeqLength = sequence.length();
-				Map<String, Float> gcSkewValues = new HashMap<>();
+				Map<String, Float> gcSkewValues = new LinkedHashMap<>();
 
-				for (int i = 0; i < (totalSeqLength / windowSize); i++) {
-					int startIndex = (i == 0) ? 0 : (i * windowSize + 1);
-					int endIndex = Math.min((i + 1) * windowSize, totalSeqLength - 1);
+				for (int i = 0; i < (totalSeqLength / defaultWindowSize); i++) {
+					int startIndex = (i == 0) ? 0 : (i * defaultWindowSize + 1);
+					int endIndex = Math.min((i + 1) * defaultWindowSize, totalSeqLength - 1);
 
 					Pattern ptrnGContent = Pattern.compile("[gG]");
 					Pattern ptrnCContent = Pattern.compile("[cC]");
@@ -346,7 +333,7 @@ public class CircosGenerator {
 				}
 
 				// Write GC skew data for this accession
-				try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_DATA + "/gc.skew.txt")));) {
+				try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + "/gc.skew.txt")));) {
 					Iterator<String> iterGC = gcSkewValues.keySet().iterator();
 					while (iterGC.hasNext()) {
 						String range = iterGC.next();
@@ -360,11 +347,11 @@ public class CircosGenerator {
 					e.printStackTrace();
 				}
 			}
-			genomeData.put("gc_skew", new ArrayList<Map<String,Object>>());
+			genomeData.put("gc_skew", new ArrayList<Map<String, Object>>());
 		}
 		// Write "large tiles" file
 		logger.info("Creating large tiles file for genome, {}", genome);
-		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_DATA + "/large.tiles.txt")))) {
+		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + "/large.tiles.txt")))) {
 			for (Map<String, Object> accession : accessions) {
 				writer.format("%s\t0\t%d\n", accession.get("accession"), accession.get("length"));
 			}
@@ -408,46 +395,41 @@ public class CircosGenerator {
 		// end
 		// end
 		// end
-
-		return true;
 	}
 
-	private void createCircosConfigFiles(String folderName, Map<?, ?> parameters, Map<String, List<Map<String, Object>>> genomeData) {
+	private void createCircosConfigFiles(Circos circos) {
+		Map<String, List<Map<String, Object>>> genomeData = circos.getGenomeData();
 		List<String> colors = new LinkedList<>();
 		colors.addAll(Arrays.asList(new String[] { "vdblue", "vdgreen", "lgreen", "vdred", "lred", "vdpurple", "lpurple", "vdorange", "lorange",
 				"vdyellow", "lyellow" }));
-		String gId = parameters.get("gid").toString();
-
+		String gId = circos.getGenomeId();
+		String dataDir = circos.getTmpDir() + DIR_DATA;
+		String confDir = circos.getTmpDir() + DIR_CONFIG;
+		
 		// Create folder for config files
+		// Copy static conf files to temp directory
 		try {
-			Files.createDirectory(Paths.get(folderName + DIR_CONFIG));
+			Files.createDirectory(Paths.get(confDir));
+			Files.copy(Paths.get(appDir + "/conf_templates/ideogram.conf"), Paths.get(confDir + "/ideogram.conf"));
+			Files.copy(Paths.get(appDir + "/conf_templates/ticks.conf"), Paths.get(confDir + "/ticks.conf"));
 		}
 		catch (IOException e) {
-			e.printStackTrace();
+			logger.error(e.getMessage());
 		}
-
-		// Copy static conf files to image's temp directory
-		try {
-			Files.copy(Paths.get(this.realPath + "/conf_templates/ideogram.conf"), Paths.get(folderName + DIR_CONFIG + "/ideogram.conf"));
-			Files.copy(Paths.get(this.realPath + "/conf_templates/ticks.conf"), Paths.get(folderName + DIR_CONFIG + "/ticks.conf"));
-		}
-		catch (IOException e) {
-			e.printStackTrace();
-		}
+		
 		logger.info("Writing config file for plots");
-
 		// Open final plot configuration file for creation
-		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_CONFIG + "/plots.conf")))) {
+		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(confDir + "/plots.conf")))) {
 			List<Map<String, String>> tilePlots = new ArrayList<>();
 			float currentRadius = 1.0f;
-			float trackThickness = imageSize * trackWidth;
+			float trackThickness = circos.getImageSize() * circos.getTrackWidth();
 
 			// Build hash for large tile data because it is not included in the
 			// genomic data
 
-			if (includeOuterTrack) {
+			if (circos.isIncludeOuterTrack()) {
 				Map<String, String> largeTileData = new HashMap<>();
-				largeTileData.put("file", folderName + DIR_DATA + "/large.tiles.txt");
+				largeTileData.put("file", dataDir + "/large.tiles.txt");
 				largeTileData.put("thickness", Float.toString((trackThickness / 2)) + "p");
 				largeTileData.put("type", "tile");
 				largeTileData.put("color", colors.remove(0));
@@ -461,33 +443,33 @@ public class CircosGenerator {
 			}
 
 			// Space in between tracks
-			float trackBuffer = trackWidth - 0.03f;
+			float trackBuffer = circos.getTrackWidth() - 0.03f;
 
 			List<Map<String, String>> nonTilePlots = new ArrayList<>();
 
 			// Build hash of plot data for Mustache to render
 			Iterator<String> keys = genomeData.keySet().iterator();
 			while (keys.hasNext()) {
-				String featureType = keys.next();
+				String track = keys.next();
 				// logger.info(featureType);
 				Map<String, String> plotData = new HashMap<>();
 
 				// Handle user uploaded files
-				if (featureType.contains("user_upload")) {
+				if (track.contains("user_upload")) {
 					// int userUploadNumber = Integer.parseInt(featureType.substring(featureType.lastIndexOf("_")));
 					// plotType = filePlotTypes.get
 					// TODO: need to implement from here
 				}
-				else if (featureType.contains("gc")) { // gc_content or gc_skew
+				else if (track.contains("gc")) { // gc_content or gc_skew
 					String plotType;
-					if (featureType.equals("gc_content")) {
-						plotType = this.gcContentPlotType;
+					if (track.equals("gc_content")) {
+						plotType = circos.getGcContentPlotType();
 					}
 					else {
-						plotType = this.gcSkewPlotType;
+						plotType = circos.getGcSkewPlotType();
 					}
 					if (plotType.equals("heatmap")) {
-						plotData.put("file", folderName + DIR_DATA + "/" + featureType.replace("_", ".") + ".txt");
+						plotData.put("file", dataDir + "/" + track.replace("_", ".") + ".txt");
 						plotData.put("thickness", Float.toString(trackThickness) + "p");
 						plotData.put("type", plotType);
 						plotData.put("color", "rdbu-10-div");
@@ -500,14 +482,14 @@ public class CircosGenerator {
 						tilePlots.add(plotData);
 					}
 					else {
-						plotData.put("file", folderName + DIR_DATA + "/" + featureType.replace("_", ".") + ".txt");
+						plotData.put("file", dataDir + "/" + track.replace("_", ".") + ".txt");
 						plotData.put("type", plotType);
 						plotData.put("color", colors.remove(0));
 						float r1 = (currentRadius -= (0.01 + trackBuffer));
 						float r0 = (currentRadius -= (0.10 + trackBuffer));
 						plotData.put("r1", Float.toString(r1) + "r");
 						plotData.put("r0", Float.toString(r0) + "r");
-						plotData.put("min", (featureType.equals("gc_skew") ? "-1.0" : "0.0"));
+						plotData.put("min", (track.equals("gc_skew") ? "-1.0" : "0.0"));
 						plotData.put("max", "1.0");
 						if (plotType.equals("histogram")) {
 							plotData.put("extendbin", "extend_bin = no");
@@ -523,7 +505,7 @@ public class CircosGenerator {
 				}
 				else {
 					// handle default/custom tracks
-					plotData.put("file", folderName + DIR_DATA + "/" + featureType.replace("_", ".") + ".txt");
+					plotData.put("file", dataDir + "/" + track.replace("_", ".") + ".txt");
 					plotData.put("thickness", Float.toString(trackThickness) + "p");
 					plotData.put("type", "tile");
 					plotData.put("color", colors.remove(0));
@@ -536,39 +518,38 @@ public class CircosGenerator {
 				}
 			}
 
-			// Render plots config file using template
-			Template tmpl = Mustache.compiler().compile(new FileReader(this.realPath + "/conf_templates/plots.mu"));
+			// plots configuration file
 			Map<String, List<Map<String, String>>> data = new HashMap<>();
 			data.put("tileplots", tilePlots);
 			data.put("nontileplots", nonTilePlots);
-			tmpl.execute(data, writer);
+
+			tmplPlotConf.execute(data, writer);
 		}
 		catch (IOException e) {
 			logger.error(e.getMessage());
-			e.printStackTrace();
 		}
 
-		// Open final image configuration file for creation
-		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_CONFIG + "/image.conf")))) {
-			Template tmpl = Mustache.compiler().compile(new BufferedReader(new FileReader(this.realPath + "/conf_templates/image.mu")));
+		// image configuration file
+		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(confDir + "/image.conf")))) {
 			Map<String, String> data = new HashMap<String, String>();
-			data.put("path", folderName);
-			data.put("image_size", Integer.toString(imageSize));
-			tmpl.execute(data, writer);
+			data.put("path", circos.getTmpDir());
+			data.put("image_size", Integer.toString(circos.getImageSize()));
+
+			tmplImageConf.execute(data, writer);
 		}
 		catch (IOException e) {
-			e.printStackTrace();
+			logger.error(e.getMessage());
 		}
 
-		// Open final circos configuration file for creation
-		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(folderName + DIR_CONFIG + "/circos.conf")))) {
-			Template tmpl = Mustache.compiler().compile(new BufferedReader(new FileReader(this.realPath + "/conf_templates/circos.mu")));
+		// circos configuration file
+		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(confDir + "/circos.conf")))) {
 			Map<String, String> data = new HashMap<String, String>();
-			data.put("folder", folderName);
-			tmpl.execute(data, writer);
+			data.put("folder", circos.getTmpDir());
+
+			tmplCircosConf.execute(data, writer);
 		}
 		catch (IOException e) {
-			e.printStackTrace();
+			logger.error(e.getMessage());
 		}
 	}
 }

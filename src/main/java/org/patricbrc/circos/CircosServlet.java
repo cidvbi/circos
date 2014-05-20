@@ -4,8 +4,9 @@ import java.io.File;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-import javax.servlet.ServletContext;
+import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -24,6 +25,14 @@ public class CircosServlet extends HttpServlet {
 
 	private static final Logger logger = LoggerFactory.getLogger(CircosGenerator.class);
 
+	CircosGenerator circosGenerator;
+
+	public void init(ServletConfig config) throws ServletException {
+		String contextPath = config.getServletContext().getRealPath(File.separator);
+		circosGenerator = new CircosGenerator(contextPath);
+		super.init(config);
+	}
+
 	@Override
 	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
 
@@ -33,7 +42,7 @@ public class CircosServlet extends HttpServlet {
 	@Override
 	protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
 
-		LinkedHashMap<String, String> parameters = new LinkedHashMap<String, String>();
+		Map<String, String> parameters = new LinkedHashMap<>();
 
 		// Parse request before run circosGenerator
 		try {
@@ -54,15 +63,9 @@ public class CircosServlet extends HttpServlet {
 			throw new ServletException("Cannot parse multipart reqeust", e);
 		}
 
-		// getContextPath
-		ServletContext servletContext = getServletContext();
-		String contextPath = servletContext.getRealPath(File.separator);
-		parameters.put("realpath", contextPath);
-
 		// Generate Circo Image
 		logger.info("parameters: {}", parameters.toString());
-		
-		CircosGenerator circosGenerator = new CircosGenerator();
+
 		String imageId = circosGenerator.createCircosImage(parameters);
 		logger.info("imageId:{}", imageId);
 

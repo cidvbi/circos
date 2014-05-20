@@ -29,15 +29,21 @@ public class CircosData {
 	public List<Map<String, Object>> getFeatures(String genome_info_id, String feature_type, String strand, String keyword) {
 		List<Map<String, Object>> docs = new LinkedList<Map<String, Object>>();
 
+		Map<String, String> solrQueryByType = new HashMap<>();
+		solrQueryByType.put("cds", "feature_type:CDS");
+		solrQueryByType.put("rna", "feature_type:*RNA");
+		solrQueryByType.put("misc", "!(feature_type:*RNA OR feature_type:CDS OR feature_type:source)");
+
 		SolrQuery query = new SolrQuery();
-		query.setQuery("gid:" + genome_info_id + ((keyword!=null)?" AND " + keyword:"") + ((strand!=null)?" AND strand:\"" + strand + "\"":""));
-		query.setFilterQueries("annotation_f:PATRIC AND " + feature_type);
+		query.setQuery("gid:" + genome_info_id + ((keyword != null) ? " AND " + keyword : "")
+				+ ((strand != null) ? " AND strand:\"" + strand + "\"" : ""));
+		query.addFilterQuery("annotation_f:PATRIC AND " + solrQueryByType.get(feature_type));
 		query.setFields("accession, start_max, end_min, sequence_info_id, gid");
 		query.setSort("accession", SolrQuery.ORDER.asc);
 		query.setSort("start_max", SolrQuery.ORDER.asc);
 		query.setRows(10000);
 
-		logger.info("SolrRequest [DNAFeature]q={}", query.getQuery());
+		logger.info("SolrRequest [DNAFeature]{}", query.toString());
 		QueryResponse qr;
 		try {
 			SolrServer solrServer = new HttpSolrServer(baseUrlSolr + "dnafeature");
@@ -68,7 +74,7 @@ public class CircosData {
 		query.setFields("genome_name, accession, length, sequence");
 		query.setSort("accession", SolrQuery.ORDER.asc);
 
-		logger.info("SolrRequest [SequenceInfo]q={}", query.getQuery());
+		logger.info("SolrRequest [SequenceInfo]{}", query.toString());
 		QueryResponse qr;
 		try {
 			SolrServer solrServer = new HttpSolrServer(baseUrlSolr + "sequenceinfo");
@@ -95,7 +101,7 @@ public class CircosData {
 		query.setQuery("gid:" + genome_info_id);
 		query.setFields("genome_name");
 
-		logger.info("SolrRequest [GenomeSummary]q={}", query.getQuery());
+		logger.info("SolrRequest [GenomeSummary]{}", query.toString());
 		QueryResponse qr;
 		try {
 			SolrServer solrServer = new HttpSolrServer(baseUrlSolr + "genomesummary");
