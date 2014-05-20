@@ -1,16 +1,16 @@
 
-karyotype={{folder}}/circos_data/karyotype.txt
+karyotype={{folder}}/data/karyotype.txt
 
 chromosomes_order_by_karyotype = yes
 chromosomes_units              = 1000
 chromosomes_display_default    = yes
 
-<<include {{folder}}/circos_configs/ideogram.conf>>
-<<include {{folder}}/circos_configs/ticks.conf>>
-<<include {{folder}}/circos_configs/plots.conf>>
+<<include {{folder}}/conf/ideogram.conf>>
+<<include {{folder}}/conf/ticks.conf>>
+<<include {{folder}}/conf/plots.conf>>
 
 <image>
-<<include {{folder}}/circos_configs/image.conf>>
+<<include {{folder}}/conf/image.conf>>
 </image>
 
 # includes etc/colors.conf
