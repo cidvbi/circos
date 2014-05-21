@@ -2,6 +2,7 @@ package org.patricbrc.circos;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.FileWriter;
@@ -22,6 +23,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.commons.fileupload.FileItem;
 import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,7 +62,7 @@ public class CircosGenerator {
 		}
 	}
 
-	public String createCircosImage(Map<String, String> parameters) {
+	public String createCircosImage(Map<String, Object> parameters) {
 		if (parameters.isEmpty()) {
 			logger.error("Circos image could not be created");
 			return null;
@@ -68,14 +70,14 @@ public class CircosGenerator {
 		else {
 			// create instance
 			Circos circos = new Circos(appDir);
-			circos.setGenomeId(parameters.get("gid"));
+			circos.setGenomeId(parameters.get("gid").toString());
 
 			// Record whether to include GC content track or not
 			if (parameters.containsKey("gc_content_plot_type")) {
-				circos.setGcContentPlotType(parameters.get("gc_content_plot_type"));
+				circos.setGcContentPlotType(parameters.get("gc_content_plot_type").toString());
 			}
 			if (parameters.containsKey("gc_skew_plot_type")) {
-				circos.setGcSkewPlotType(parameters.get("gc_skew_plot_type"));
+				circos.setGcSkewPlotType(parameters.get("gc_skew_plot_type").toString());
 			}
 
 			// Record whether to include outer track or not
@@ -85,20 +87,16 @@ public class CircosGenerator {
 
 			// Store image size parameter from form
 			if (parameters.containsKey("image_dimensions") && parameters.get("image_dimensions").equals("") == false) {
-				circos.setImageSize(Integer.parseInt(parameters.get("image_dimensions")));
+				circos.setImageSize(Integer.parseInt(parameters.get("image_dimensions").toString()));
 			}
 
 			// Convert track width parameter to percentage and store it
 			if (parameters.containsKey("track_width")) {
-				circos.setTrackWidth((float) (Integer.parseInt(parameters.get("track_width")) / 100.0));
+				circos.setTrackWidth((float) (Integer.parseInt(parameters.get("track_width").toString()) / 100.0));
 			}
 
 			// Collect genome data using Solr API for PATRIC
 			circos.setGenomeData(this.getGenomeData(parameters));
-			if (circos.getGenomeData() == null || circos.getGenomeData().isEmpty()) {
-				logger.error("No genome data found for GID {}", parameters.get("gid"));
-				return null;
-			}
 
 			// Create temp directory for this image's data
 			String tmpFolderName = circos.getTmpDir();
@@ -111,7 +109,7 @@ public class CircosGenerator {
 			}
 
 			// Create data and config files for Circos
-			createCircosDataFiles(circos);
+			createCircosDataFiles(parameters, circos);
 			createCircosConfigFiles(circos);
 
 			// Run Circos script to generate final image
@@ -132,8 +130,8 @@ public class CircosGenerator {
 		}
 	}
 
-	private Map<String, List<Map<String, Object>>> getGenomeData(Map<String, String> parameters) {
-		String gId = parameters.get("gid");
+	private Map<String, List<Map<String, Object>>> getGenomeData(Map<String, Object> parameters) {
+		String gId = parameters.get("gid").toString();
 		List<String> defaultDataTracks = new ArrayList<>();
 		defaultDataTracks.addAll(Arrays.asList(new String[] { "cds_forward", "cds_reverse", "rna_forward", "rna_reverse", "misc_forward",
 				"misc_reverse" }));
@@ -170,8 +168,8 @@ public class CircosGenerator {
 		// Gather data for each custom track
 		for (Integer trackNum : trackNums) {
 			String customTrackName = "custom_track_" + trackNum;
-			String featureType = parameters.get("custom_track_type_" + trackNum);
-			String paramStrand = parameters.get("custom_track_strand_" + trackNum);
+			String featureType = parameters.get("custom_track_type_" + trackNum).toString();
+			String paramStrand = parameters.get("custom_track_strand_" + trackNum).toString();
 			String strand;
 			switch (paramStrand) {
 			case "forward":
@@ -185,14 +183,14 @@ public class CircosGenerator {
 			}
 			String keywords = null;
 			if (parameters.containsKey("custom_track_keyword_" + trackNum)) {
-				keywords = parameters.get("custom_track_keyword_" + trackNum);
+				keywords = parameters.get("custom_track_keyword_" + trackNum).toString();
 			}
 			genomeData.put(customTrackName, circosData.getFeatures(gId, featureType, strand, keywords));
 		}
 		return genomeData;
 	}
 
-	private void createCircosDataFiles(Circos circos) {
+	private void createCircosDataFiles(Map<String, Object> parameters, Circos circos) {
 
 		// Create folder for all data files
 		String dirData = circos.getTmpDir() + DIR_DATA;
@@ -361,40 +359,40 @@ public class CircosGenerator {
 			e.printStackTrace();
 		}
 
-		// Move uploaded data files to the new image's 'circos_data' directory
-
-		// unless parameters[:file_chooser].nil?
-		// uploaded_file_name_list = parameters[:file_chooser].map { |e| e[:tempfile] }
-		//
-		// # Get file plot type parameters from web form and convert the symbols
-		// # to strings
-		// $file_plot_types = parameters.select { |k,v| k.include? "file_plot_type" }.map { |k,v| v }
-		//
-		// unless uploaded_file_name_list.nil?
-		// uploaded_file_name_list.each_with_index do |upload_tempfile,i|
-		// File.open("#{folder_name}/circos_data/user.upload.#{i}.txt", "w") do |file|
-		// first_line = upload_tempfile.readline
-		// file_plot_type = $file_plot_types[i]
-		//
-		// if file_plot_type == 'tile'
-		// next if first_line.split(/\s+/).size != 3
-		// else
-		// next if first_line.split(/\s+/).size != 4
-		// end
-		//
-		// # Read from the server's temporary version of the file and write
-		// # it to a data file in the new image's directory
-		// upload_tempfile.rewind
-		// tempfile_contents = upload_tempfile.read
-		//
-		// file.write(tempfile_contents)
-		//
-		// # Add custom track to genome data so that it will be plotted
-		// genome_data["user_upload_#{i}"] = true
-		// end
-		// end
-		// end
-		// end
+		// Process upload files
+		List<Map<String, Object>> fileupload = new ArrayList<Map<String, Object>>();
+		Set<Integer> trackNums = new HashSet<>();
+		Iterator<String> paramKeys = (Iterator<String>) parameters.keySet().iterator();
+		while (paramKeys.hasNext()) {
+			String key = paramKeys.next();
+			if (key.matches("file_(\\d+)$")) {
+				int num = Integer.parseInt(key.substring(key.lastIndexOf("_") + 1));
+				logger.info("{} matches {}", key, num);
+				trackNums.add(num);
+			}
+		}
+		for (Integer trackNum : trackNums) {
+			if (parameters.containsKey("file_" + trackNum)) {
+				FileItem item = (FileItem) parameters.get("file_" + trackNum);
+				try {
+					// item.write(new File(dirData + "/" + item.getName()));
+					String fileName = "user.upload." + trackNum + ".txt";
+					item.write(new File(dirData + "/" + fileName));
+					// TODO: add file format check
+					String plotType = parameters.get("file_plot_type_" + trackNum).toString();
+					Map<String, Object> file = new HashMap<>();
+					file.put("file_name", fileName);
+					file.put("plot_type", plotType);
+					fileupload.add(file);
+				}
+				catch (Exception e) {
+					logger.error(e.getMessage());
+				}
+			}
+		}
+		if (trackNums.size() > 0) {
+			genomeData.put("user_upload", fileupload);
+		}
 	}
 
 	private void createCircosConfigFiles(Circos circos) {
@@ -405,7 +403,7 @@ public class CircosGenerator {
 		String gId = circos.getGenomeId();
 		String dataDir = circos.getTmpDir() + DIR_DATA;
 		String confDir = circos.getTmpDir() + DIR_CONFIG;
-		
+
 		// Create folder for config files
 		// Copy static conf files to temp directory
 		try {
@@ -416,7 +414,7 @@ public class CircosGenerator {
 		catch (IOException e) {
 			logger.error(e.getMessage());
 		}
-		
+
 		logger.info("Writing config file for plots");
 		// Open final plot configuration file for creation
 		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(confDir + "/plots.conf")))) {
@@ -451,14 +449,57 @@ public class CircosGenerator {
 			Iterator<String> keys = genomeData.keySet().iterator();
 			while (keys.hasNext()) {
 				String track = keys.next();
-				// logger.info(featureType);
 				Map<String, String> plotData = new HashMap<>();
 
 				// Handle user uploaded files
 				if (track.contains("user_upload")) {
-					// int userUploadNumber = Integer.parseInt(featureType.substring(featureType.lastIndexOf("_")));
-					// plotType = filePlotTypes.get
-					// TODO: need to implement from here
+					List<Map<String, Object>> files = genomeData.get(track);
+
+					for (Map<String, Object> file : files) {
+						plotData = new HashMap<>();
+						String plotType = file.get("plot_type").toString();
+
+						if (plotType.equals("tile") || plotType.equals("heatmap")) {
+							plotData.put("file", dataDir + "/" + file.get("file_name"));
+							plotData.put("thickness", Float.toString(trackThickness) + "p");
+							plotData.put("type", plotType);
+							if (plotType.equals("tile")) {
+								plotData.put("color", colors.remove(0));
+							}
+							else {
+								plotData.put("color", "rdbu-10-div");
+							}
+							float r1 = (currentRadius -= (0.01 + trackBuffer));
+							float r0 = (currentRadius -= (0.04 + trackBuffer));
+							plotData.put("r1", Float.toString(r1) + "r");
+							plotData.put("r0", Float.toString(r0) + "r");
+							plotData.put("gid", gId);
+
+							tilePlots.add(plotData);
+						}
+						else {
+							plotData.put("file", dataDir + "/" + file.get("file_name"));
+							plotData.put("type", plotType);
+							plotData.put("color", colors.remove(0));
+							float r1 = (currentRadius -= (0.01 + trackBuffer));
+							float r0 = (currentRadius -= (0.10 + trackBuffer));
+							plotData.put("r1", Float.toString(r1) + "r");
+							plotData.put("r0", Float.toString(r0) + "r");
+							plotData.put("min", "0.0");
+							plotData.put("max", "1.0");
+							if (plotType.equals("histogram")) {
+								plotData.put("extendbin", "extend_bin = no");
+							}
+							else {
+								plotData.put("extendbin", "");
+							}
+							String baseColor = plotData.get("color").replaceAll("^[vld]+", "");
+							plotData.put("plotbgcolor", "vvl" + baseColor);
+							// plotData.put("plotbgcolor", "white"); // temporary value
+
+							nonTilePlots.add(plotData);
+						}
+					}
 				}
 				else if (track.contains("gc")) { // gc_content or gc_skew
 					String plotType;
@@ -497,8 +538,9 @@ public class CircosGenerator {
 						else {
 							plotData.put("extendbin", "");
 						}
-						// plotData.put("plotbgcolor", value);
-						plotData.put("plotbgcolor", "white"); // temporary value
+						String baseColor = plotData.get("color").replaceAll("^[vld]+", "");
+						plotData.put("plotbgcolor", "vvl" + baseColor);
+						// plotData.put("plotbgcolor", "white"); // temporary value
 
 						nonTilePlots.add(plotData);
 					}

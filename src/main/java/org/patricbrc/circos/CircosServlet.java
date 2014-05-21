@@ -42,8 +42,8 @@ public class CircosServlet extends HttpServlet {
 	@Override
 	protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
 
-		Map<String, String> parameters = new LinkedHashMap<>();
-
+		Map<String, Object> parameters = new LinkedHashMap<>();
+		int fileCount = 0;
 		// Parse request before run circosGenerator
 		try {
 			List<FileItem> items = new ServletFileUpload(new DiskFileItemFactory()).parseRequest(request);
@@ -52,10 +52,8 @@ public class CircosServlet extends HttpServlet {
 					parameters.put(item.getFieldName(), item.getString());
 				}
 				else {
-					// TODO: process form file field
-					// String fieldName = item.getFieldName();
-					// String filename = FilenameUtils.getName(item.getName());
-					// InputStream filecontent = item.getInputStream();
+					parameters.put("file_" + fileCount, item);
+					fileCount++;
 				}
 			}
 		}
