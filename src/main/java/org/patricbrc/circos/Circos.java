@@ -21,8 +21,6 @@ public class Circos {
 
 	private String gcSkewPlotType = null;
 
-	// private String filePlotTypes = "tiles";
-
 	private Map<String, List<Map<String, Object>>> genomeData;
 
 	public Circos(String dir) {

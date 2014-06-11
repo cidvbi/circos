@@ -7,6 +7,7 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -124,7 +125,6 @@ public class CircosGenerator {
 			catch (Exception e) {
 				e.printStackTrace();
 			}
-			logger.info("Circos image was created successfully!");
 
 			return circos.getUuid();
 		}
@@ -213,8 +213,8 @@ public class CircosGenerator {
 			String fileName = "/" + track.replace("_", ".") + ".txt";
 			try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + fileName)))) {
 				for (Map<String, Object> gene : featureData) {
-					writer.format("%s\t%d\t%d\tid=%d\n", gene.get("accession"), gene.get("start_max"), gene.get("end_min"),
-							gene.get("sequence_info_id"));
+					writer.format("%s\t%d\t%d\tid=%d,fid=%d\n", gene.get("accession"), gene.get("start_max"), gene.get("end_min"),
+							gene.get("sequence_info_id"), gene.get("na_feature_id"));
 				}
 			}
 			catch (IOException e) {
@@ -226,16 +226,11 @@ public class CircosGenerator {
 
 		List<Map<String, Object>> accessions = circosData.getAccessions(circos.getGenomeId());
 
-		Map<String, String> accessionSequenceData = new HashMap<>();
-
 		// Write karyotype file
 		logger.info("Creating karyotype file for genome,{}", genome);
 		try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + "/karyotype.txt")))) {
 			for (Map<String, Object> accession : accessions) {
 				writer.format("chr\t-\t %s\t %s\t 0\t %d\t grey\n", accession.get("accession"), genome.replace(" ", "_"), accession.get("length"));
-				if (circos.getGcContentPlotType() != null || circos.getGcSkewPlotType() != null) {
-					accessionSequenceData.put(accession.get("accession").toString(), accession.get("sequence").toString());
-				}
 			}
 		}
 		catch (IOException e) {
@@ -249,13 +244,12 @@ public class CircosGenerator {
 		if (circos.getGcContentPlotType() != null) {
 			logger.info("Creating data file for GC content");
 
-			// accession_sequence_data.each do |accession,sequence|
-			iter = accessionSequenceData.keySet().iterator();
-			while (iter.hasNext()) {
-				String accession = iter.next();
-				String sequence = accessionSequenceData.get(accession);
+			Map<String, Float> gcContentValues = new LinkedHashMap<>();
+
+			for (Map<String, Object> accession : accessions) {
+				String accessionID = accession.get("accession").toString();
+				String sequence = accession.get("sequence").toString();
 				int totalSeqLength = sequence.length();
-				Map<String, Float> gcContentValues = new LinkedHashMap<>();
 
 				// Iterate over each window_size-sized block and calculate its GC content.
 				// For instance, if the sequence length were 1,234,567 and the window size were 1000, we would iterate 1234 times, with the last
@@ -280,37 +274,36 @@ public class CircosGenerator {
 					float gcPercentage = (gcCount / (float) currentWindowSize);
 
 					// Store percentage in gc_content_values hash as value with the range from the start index to the end index as the key
-					gcContentValues.put(startIndex + ".." + endIndex, gcPercentage); // .round(5)
-				}
-
-				// Write GC content data for this accession
-				try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + "/gc.content.txt")))) {
-					Iterator<String> iterGC = gcContentValues.keySet().iterator();
-					while (iterGC.hasNext()) {
-						String range = iterGC.next();
-						String strIndex = range.split("\\.\\.")[0];
-						String endIndex = range.split("\\.\\.")[1];
-						float percentage = gcContentValues.get(range);
-						// logger.info("{}, {}, {}", accession, strIndex, endIndex);
-						writer.format("%s\t%s\t%s\t%f\n", accession, strIndex, endIndex, percentage);
-					}
-				}
-				catch (IOException e) {
-					e.printStackTrace();
+					gcContentValues.put(accessionID + ":" + startIndex + ".." + endIndex, gcPercentage); // .round(5)
 				}
 			}
+			// Write GC content data for this accession
+			try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + "/gc.content.txt")))) {
+				Iterator<String> iterGC = gcContentValues.keySet().iterator();
+				while (iterGC.hasNext()) {
+					String range = iterGC.next();
+					String[] rangeId = range.split(":");
+					String[] rangeLoc = rangeId[1].split("\\.\\.");
+					// logger.info("{}, {}, {}", accession, strIndex, endIndex);
+					writer.format("%s\t%s\t%s\t%f\n", rangeId[0], rangeLoc[0], rangeLoc[1], gcContentValues.get(range));
+				}
+			}
+			catch (IOException e) {
+				e.printStackTrace();
+			}
+
 			genomeData.put("gc_content", new ArrayList<Map<String, Object>>());
 		}
 
 		// Create GC skew data file
 		if (circos.getGcSkewPlotType() != null) {
 			logger.info("Creating data file for GC skew");
-			iter = accessionSequenceData.keySet().iterator();
-			while (iter.hasNext()) {
-				String accession = iter.next();
-				String sequence = accessionSequenceData.get(accession);
+
+			Map<String, Float> gcSkewValues = new LinkedHashMap<>();
+			for (Map<String, Object> accession : accessions) {
+				String accessionId = accession.get("accession").toString();
+				String sequence = accession.get("sequence").toString();
 				int totalSeqLength = sequence.length();
-				Map<String, Float> gcSkewValues = new LinkedHashMap<>();
 
 				for (int i = 0; i < (totalSeqLength / defaultWindowSize); i++) {
 					int startIndex = (i == 0) ? 0 : (i * defaultWindowSize + 1);
@@ -327,24 +320,23 @@ public class CircosGenerator {
 					for (cCount = 0; mtchrC.find(); cCount++)
 						;
 					float gcSkew = (float) (gCount - cCount) / (gCount + cCount);
-					gcSkewValues.put(startIndex + ".." + endIndex, gcSkew);
-				}
-
-				// Write GC skew data for this accession
-				try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + "/gc.skew.txt")));) {
-					Iterator<String> iterGC = gcSkewValues.keySet().iterator();
-					while (iterGC.hasNext()) {
-						String range = iterGC.next();
-						String strIndex = range.split("\\.\\.")[0];
-						String endIndex = range.split("\\.\\.")[1];
-						float skew = gcSkewValues.get(range);
-						writer.format("%s\t%s\t%s\t%f\n", accession, strIndex, endIndex, skew);
-					}
-				}
-				catch (IOException e) {
-					e.printStackTrace();
+					gcSkewValues.put(accessionId + ":" + startIndex + ".." + endIndex, gcSkew);
 				}
 			}
+			// Write GC skew data for this accession
+			try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + "/gc.skew.txt")));) {
+				Iterator<String> iterGC = gcSkewValues.keySet().iterator();
+				while (iterGC.hasNext()) {
+					String range = iterGC.next();
+					String[] rangeId = range.split(":");
+					String[] rangeLoc = rangeId[1].split("\\.\\.");
+					writer.format("%s\t%s\t%s\t%f\n", rangeId[0], rangeLoc[0], rangeLoc[1], gcSkewValues.get(range));
+				}
+			}
+			catch (IOException e) {
+				e.printStackTrace();
+			}
+
 			genomeData.put("gc_skew", new ArrayList<Map<String, Object>>());
 		}
 		// Write "large tiles" file
@@ -367,23 +359,55 @@ public class CircosGenerator {
 			String key = paramKeys.next();
 			if (key.matches("file_(\\d+)$")) {
 				int num = Integer.parseInt(key.substring(key.lastIndexOf("_") + 1));
-				logger.info("{} matches {}", key, num);
-				trackNums.add(num);
+				FileItem item = (FileItem) parameters.get("file_" + num);
+				// logger.info("{} matches, filename={}", key, item.getName().toString());
+				if (item.getName().toString().equals("") == false) {
+					trackNums.add(num);
+				}
 			}
 		}
 		for (Integer trackNum : trackNums) {
 			if (parameters.containsKey("file_" + trackNum)) {
 				FileItem item = (FileItem) parameters.get("file_" + trackNum);
 				try {
-					// item.write(new File(dirData + "/" + item.getName()));
 					String fileName = "user.upload." + trackNum + ".txt";
-					item.write(new File(dirData + "/" + fileName));
-					// TODO: add file format check
 					String plotType = parameters.get("file_plot_type_" + trackNum).toString();
-					Map<String, Object> file = new HashMap<>();
-					file.put("file_name", fileName);
-					file.put("plot_type", plotType);
-					fileupload.add(file);
+					boolean isValid = true;
+
+					try (BufferedReader br = new BufferedReader(new InputStreamReader(item.getInputStream()))) {
+						String line;
+						while ((line = br.readLine()) != null && isValid == true) {
+							String[] tab = line.split("\t");
+							if (plotType.equals("tile")) {
+								if (tab[3].contains("id=") == false) {
+									// System.out.println("!!!!!!!!!!! error file for tile");
+									isValid = false;
+								}
+							}
+							else if (plotType.equals("line") || plotType.equals("histogram") || plotType.equals("heatmap")) {
+								try {
+									Float.parseFloat(tab[3]);
+								}
+								catch (NumberFormatException | NullPointerException ex) {
+									// System.out.println("!!!!!!!!!!!! error file fot plots");
+									isValid = false;
+								}
+							}
+							else {
+								isValid = false;
+							}
+						}
+					}
+					catch (IOException e) {
+						e.printStackTrace();
+					}
+					if (isValid) {
+						item.write(new File(dirData + "/" + fileName));
+						Map<String, Object> file = new HashMap<>();
+						file.put("file_name", fileName);
+						file.put("plot_type", plotType);
+						fileupload.add(file);
+					}
 				}
 				catch (Exception e) {
 					logger.error(e.getMessage());

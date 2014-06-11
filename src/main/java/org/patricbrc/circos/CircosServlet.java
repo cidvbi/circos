@@ -68,7 +68,7 @@ public class CircosServlet extends HttpServlet {
 		logger.info("imageId:{}", imageId);
 
 		if (imageId != null) {
-			response.getWriter().write(imageId);
+			response.getWriter().write("{success: true, \"imageId\":\"" + imageId + "\"}"); // ExtJS return format
 		}
 	}
 }
