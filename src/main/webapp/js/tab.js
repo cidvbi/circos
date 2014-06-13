@@ -1,5 +1,6 @@
 var genome_info_id = 87468;
 var form_url = '/circos/home';
+var ds_url = '//localhost:8888';
 
 Ext.onReady(function() {
   Ext.create('Ext.form.Panel', {
@@ -306,4 +307,109 @@ function addFileTrack() {
 
   panelParent.insert(fileTrackCount, ct);
   fileTrackCount++;
+}
+
+function linkFeature(id) {
+  Ext.Ajax.request({
+    url: ds_url + '/dnafeature/' + id,
+    success: function(rs) {
+      createPopup(JSON.parse(rs.responseText));
+    }
+  });
+}
+
+function createPopup(feature) {
+  var strFeature = Ext.String.format("{0}{1}{2}", feature.locus_tag, (feature.refseq_locus_tag!=null?" | "+feature.refseq_locus_tag:""), (feature.gene!=null?" | "+feature.gene:""));
+  var strLoc = Ext.String.format("{0}: {1}..{2} ({3})", feature.feature_type, feature.start_max, feature.end_min, feature.strand);
+
+  var linkFeature = Ext.String.format("Feature?cType=feature&cId={0}", feature.na_feature_id);
+  var linkGB = Ext.String.format("GenomeBrowser?cType=feature&cId={0}&loc={1}..{2}&tracks=DNA,PATRICGenes", feature.na_feature_id, feature.start_max, feature.end_min);
+  var linkCRV = Ext.String.format("CompareRegionViewer?cType=feature&cId={0}&tracks=&regions=5&window=10000&loc=1..10000", feature.na_feature_id);
+  var linkPW = Ext.String.format("PathwayTable?cType=feature&cId={0}", feature.na_feature_id);
+  var linkTR = Ext.String.format("TranscriptomicsGeneExp?cType=feature&cId={0}&sampleId=&colId=&log_ratio=&zscore=", feature.na_feature_id);
+  var linkCR = Ext.String.format("TranscriptomicsGeneCorrelated?cType=feature&cId={0}", feature.na_feature_id);
+
+  Ext.create('Ext.window.Window', {
+    width: 500,
+    border: false,
+    bodyStyle: {'background-color': '#fff'},
+    items: [{
+      xtype: 'displayfield',
+      value: '<h2>Feature Details</h2>',
+      padding: 5
+    }, {
+      xtype: 'panel',
+      border: false,
+      items: [{
+        html: '<a href="' + linkFeature + '">' + strFeature + '</a>',
+        border: false,
+        padding: '5 0 5 15'
+      }, {
+        xtype: 'displayfield',
+        value: feature.product,
+        padding: '5 0 5 15'
+      }, {
+        xtype: 'displayfield',
+        value: strLoc,
+        padding: '5 0 5 15'
+      }]
+    }, {
+      xtype: 'displayfield',
+      value: '<h2>For this feature, view:</h2>',
+      padding: 5
+    }, {
+      xtype: 'panel',
+      border: false,
+      items: [{
+        html: '<a href="' + linkGB + '">Genome Browser</a> &nbsp; <a href="' + linkCRV + '">Compare Region Viewer</a> &nbsp; <a href="' + linkPW + '">Pathways</a> &nbsp; <a href="' + linkTR + '">Transcriptomics Data</a> &nbsp; <a href="' + linkCR + '">Correlated genes</a>',
+        padding: '5 0 5 15',
+        style: {'line-height': '1.8em'},
+        border: false
+      }]
+    }],
+    buttons: [{
+      text: 'OK',
+      handler: function() {
+        var w = this.up('window');
+        w.close();
+      }
+    }]
+  }).show();
+}
+
+var tooltipFired = false;
+var tooltipTarget, tooltipId;
+var tooltip;
+
+function tooltipFeature(target, id) {
+  tooltipTarget = target;
+  tooltipId = id;
+
+  if (tooltipFired !== false) {
+    clearTimeout(tooltipFired);
+  }
+  tooltipFired = setTimeout(loadFeature, 500);
+}
+
+function loadFeature() {
+  Ext.Ajax.request({
+    url: ds_url + '/dnafeature/' + tooltipId,
+    success: function(rs) {
+      createTooltip(JSON.parse(rs.responseText));
+    }
+  });
+}
+
+function createTooltip(feature) {
+  var strFeature = Ext.String.format("{0}{1}{2}", feature.locus_tag, (feature.refseq_locus_tag!=null?" | "+feature.refseq_locus_tag:""), (feature.gene!=null?" | "+feature.gene:""));
+  var strLoc = Ext.String.format("{0}: {1} .. {2} ({3})", feature.feature_type, feature.start_max, feature.end_min, feature.strand);
+
+  tooltip = Ext.create('Ext.tip.ToolTip', {
+    target: tooltipTarget.id || tooltipTarget,
+    anchor: 'top',
+    trackMouse: true,
+    html: '<p><b>' + strFeature + '</b><br/>' + feature.product + '<br/>' + strLoc + '<br/><i>Click for detail information</i></p>',
+    tooltip: 10,
+    bodyStyle: {'line-height': '2em'}
+  });
 }

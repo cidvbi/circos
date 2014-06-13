@@ -17,3 +17,4 @@ auto_alpha_steps  = 5
 
 image_map_use      = yes
 image_map_name     = circosmap
+image_map_missing_parameter = removeurl

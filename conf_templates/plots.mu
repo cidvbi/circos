@@ -18,7 +18,7 @@
         r0 = {{r0}}
         r1 = {{r1}}
         
-        url = http://patricbrc.org/portal/portal/patric/GenomeBrowser?cType=genome&cId={{gid}}&loc=sid|[id]|accn|[chr]:[start]..[end]&tracks=PATRICGenes
+        url = javascript:linkFeature([id])' onmouseover='tooltipFeature(this, [id])
     </plot>
 
     {{/tileplots}}

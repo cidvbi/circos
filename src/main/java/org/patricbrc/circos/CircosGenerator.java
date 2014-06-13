@@ -213,8 +213,7 @@ public class CircosGenerator {
 			String fileName = "/" + track.replace("_", ".") + ".txt";
 			try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(dirData + fileName)))) {
 				for (Map<String, Object> gene : featureData) {
-					writer.format("%s\t%d\t%d\tid=%d,fid=%d\n", gene.get("accession"), gene.get("start_max"), gene.get("end_min"),
-							gene.get("sequence_info_id"), gene.get("na_feature_id"));
+					writer.format("%s\t%d\t%d\tid=%d\n", gene.get("accession"), gene.get("start_max"), gene.get("end_min"), gene.get("na_feature_id"));
 				}
 			}
 			catch (IOException e) {
@@ -379,8 +378,12 @@ public class CircosGenerator {
 						while ((line = br.readLine()) != null && isValid == true) {
 							String[] tab = line.split("\t");
 							if (plotType.equals("tile")) {
-								if (tab[3].contains("id=") == false) {
-									// System.out.println("!!!!!!!!!!! error file for tile");
+								if (tab.length == 3) {
+								}
+								else if (tab[3].contains("id=") == false) {
+									isValid = false;
+								}
+								else {
 									isValid = false;
 								}
 							}
@@ -389,7 +392,6 @@ public class CircosGenerator {
 									Float.parseFloat(tab[3]);
 								}
 								catch (NumberFormatException | NullPointerException ex) {
-									// System.out.println("!!!!!!!!!!!! error file fot plots");
 									isValid = false;
 								}
 							}
@@ -410,7 +412,7 @@ public class CircosGenerator {
 					}
 				}
 				catch (Exception e) {
-					logger.error(e.getMessage());
+					e.printStackTrace();
 				}
 			}
 		}
